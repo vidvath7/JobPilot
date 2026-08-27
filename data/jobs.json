@@ -1,0 +1,162 @@
+[
+  {
+    "id": "JOB-001",
+    "title": "AI Engineer",
+    "company": "Lumen Forge AI",
+    "location": "Berlin, Germany",
+    "experience_level": "Mid-level",
+    "required_skills": [
+      "Python",
+      "PyTorch",
+      "FastAPI",
+      "Docker",
+      "Git"
+    ],
+    "description": "Build and deploy machine-learning features for a synthetic document-intelligence platform, working across model development and Python APIs.",
+    "url": "https://jobs.example.test/JOB-001"
+  },
+  {
+    "id": "JOB-002",
+    "title": "Machine Learning Engineer",
+    "company": "Alpine Signal Works",
+    "location": "Munich, Germany",
+    "experience_level": "Mid-level",
+    "required_skills": [
+      "Python",
+      "scikit-learn",
+      "SQL",
+      "Docker",
+      "AWS"
+    ],
+    "description": "Develop predictive services and repeatable training pipelines for a fictional industrial analytics product.",
+    "url": "https://jobs.example.test/JOB-002"
+  },
+  {
+    "id": "JOB-003",
+    "title": "Applied AI Engineer",
+    "company": "Harborlight Intelligence",
+    "location": "Hamburg, Germany",
+    "experience_level": "Senior",
+    "required_skills": [
+      "Python",
+      "LLMs",
+      "RAG",
+      "Kubernetes",
+      "Azure"
+    ],
+    "description": "Lead the delivery of generative-AI prototypes and production retrieval systems for an entirely fictional logistics assistant.",
+    "url": "https://jobs.example.test/JOB-003"
+  },
+  {
+    "id": "JOB-004",
+    "title": "Python Backend Engineer",
+    "company": "Rhine Loop Software",
+    "location": "Cologne, Germany",
+    "experience_level": "Mid-level",
+    "required_skills": [
+      "Python",
+      "FastAPI",
+      "PostgreSQL",
+      "Docker",
+      "REST APIs"
+    ],
+    "description": "Create reliable backend APIs and data services for a synthetic workflow-automation product.",
+    "url": "https://jobs.example.test/JOB-004"
+  },
+  {
+    "id": "JOB-005",
+    "title": "Data Scientist",
+    "company": "Canal Metrics Cooperative",
+    "location": "Amsterdam, Netherlands",
+    "experience_level": "Mid-level",
+    "required_skills": [
+      "Python",
+      "pandas",
+      "SQL",
+      "scikit-learn",
+      "Statistics"
+    ],
+    "description": "Analyze synthetic marketplace data and build interpretable forecasting models with product stakeholders.",
+    "url": "https://jobs.example.test/JOB-005"
+  },
+  {
+    "id": "JOB-006",
+    "title": "Junior MLOps Engineer",
+    "company": "Mainframe Meadow",
+    "location": "Frankfurt, Germany",
+    "experience_level": "Junior",
+    "required_skills": [
+      "Python",
+      "Docker",
+      "CI/CD",
+      "MLflow",
+      "Kubernetes"
+    ],
+    "description": "Support model packaging, deployment pipelines, and monitoring for a fictional financial-risk platform.",
+    "url": "https://jobs.example.test/JOB-006"
+  },
+  {
+    "id": "JOB-007",
+    "title": "Senior Computer Vision Engineer",
+    "company": "Helvetic Pixel Labs",
+    "location": "Zurich, Switzerland",
+    "experience_level": "Senior",
+    "required_skills": [
+      "Python",
+      "PyTorch",
+      "OpenCV",
+      "CUDA",
+      "C++"
+    ],
+    "description": "Design high-performance visual inspection models for a made-up precision manufacturing system.",
+    "url": "https://jobs.example.test/JOB-007"
+  },
+  {
+    "id": "JOB-008",
+    "title": "Frontend Developer",
+    "company": "Danube Interface Studio",
+    "location": "Vienna, Austria",
+    "experience_level": "Mid-level",
+    "required_skills": [
+      "TypeScript",
+      "React",
+      "CSS",
+      "Node.js",
+      "Web Accessibility"
+    ],
+    "description": "Build accessible user interfaces for a synthetic event-planning application.",
+    "url": "https://jobs.example.test/JOB-008"
+  },
+  {
+    "id": "JOB-009",
+    "title": "AI Research Scientist",
+    "company": "Left Bank Machine Reasoning",
+    "location": "Paris, France",
+    "experience_level": "Senior",
+    "required_skills": [
+      "Python",
+      "PyTorch",
+      "Transformers",
+      "Research Publications",
+      "PhD"
+    ],
+    "description": "Research new model architectures and publish experimental findings for a fictional AI research group.",
+    "url": "https://jobs.example.test/JOB-009"
+  },
+  {
+    "id": "JOB-010",
+    "title": "Cloud Platform Engineer",
+    "company": "Emerald Compute Fabric",
+    "location": "Dublin, Ireland",
+    "experience_level": "Senior",
+    "required_skills": [
+      "Go",
+      "Kubernetes",
+      "Terraform",
+      "AWS",
+      "Linux"
+    ],
+    "description": "Operate cloud infrastructure and developer platforms for a fictional distributed-systems company.",
+    "url": "https://jobs.example.test/JOB-010"
+  }
+]

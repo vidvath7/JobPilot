@@ -1,0 +1,63 @@
+{
+  "name": "Alex Morgan",
+  "summary": "Application-focused machine learning engineer with three years of experience building Python services, data pipelines, and production ML features.",
+  "skills": [
+    "Python",
+    "PyTorch",
+    "scikit-learn",
+    "FastAPI",
+    "SQL",
+    "pandas",
+    "NumPy",
+    "Docker",
+    "Git",
+    "REST APIs"
+  ],
+  "experience": [
+    {
+      "role": "Machine Learning Engineer",
+      "company": "Northstar Analytics Lab",
+      "location": "Berlin, Germany",
+      "start_year": 2023,
+      "end_year": 2026,
+      "highlights": [
+        "Built and evaluated PyTorch and scikit-learn models for document classification.",
+        "Deployed model-backed APIs with FastAPI and Docker.",
+        "Created SQL and pandas pipelines for reproducible training datasets."
+      ]
+    },
+    {
+      "role": "Software Engineering Intern",
+      "company": "Cedar Systems Studio",
+      "location": "Hamburg, Germany",
+      "start_year": 2022,
+      "end_year": 2022,
+      "highlights": [
+        "Implemented Python REST API endpoints and automated data-validation tasks.",
+        "Used Git-based code review and CI workflows in a small product team."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "degree": "BSc Computer Science",
+      "institution": "Example Technical University",
+      "graduation_year": 2022
+    }
+  ],
+  "preferred_roles": [
+    "AI Engineer",
+    "Machine Learning Engineer",
+    "Python Backend Engineer"
+  ],
+  "preferred_locations": [
+    "Berlin, Germany",
+    "Hamburg, Germany",
+    "Munich, Germany",
+    "Remote, EU"
+  ],
+  "preferred_experience_levels": [
+    "Junior",
+    "Mid-level"
+  ]
+}
