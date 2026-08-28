@@ -10,12 +10,15 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
+from mcp.shared.exceptions import MCPError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SUMMARY_FIELDS = {"id", "title", "company", "location", "experience_level"}
+FULL_JOB_FIELDS = SUMMARY_FIELDS | {"required_skills", "description", "url"}
 
 
 def test_search_jobs_over_mcp_stdio() -> None:
@@ -145,3 +148,60 @@ async def _exercise_candidate_profile_resource_over_mcp_stdio() -> None:
                 "preferred_locations",
                 "preferred_experience_levels",
             } <= profile.keys()
+
+
+def test_job_details_resource_template_over_mcp_stdio() -> None:
+    """Discover the template and read known and unknown jobs through MCP."""
+    asyncio.run(_exercise_job_details_resource_template_over_mcp_stdio())
+
+
+async def _exercise_job_details_resource_template_over_mcp_stdio() -> None:
+    """Exercise template discovery, URI binding, and protocol error mapping."""
+    server_parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "server.main"],
+        cwd=PROJECT_ROOT,
+    )
+
+    async with stdio_client(server_parameters) as (read_stream, write_stream):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=10.0,
+        ) as session:
+            await session.initialize()
+
+            static_resources = await session.list_resources()
+            assert [str(resource.uri) for resource in static_resources.resources] == [
+                "candidate://profile"
+            ]
+
+            templates_result = await session.list_resource_templates()
+            assert len(templates_result.resource_templates) == 1
+            template = templates_result.resource_templates[0]
+            assert template.uri_template == "jobs://job/{job_id}"
+            assert template.mime_type == "application/json"
+            assert "full details" in (template.description or "").casefold()
+
+            read_result = await session.read_resource("jobs://job/JOB-001")
+            assert isinstance(read_result, types.ReadResourceResult)
+            assert read_result.result_type == "complete"
+            assert len(read_result.contents) == 1
+
+            content = read_result.contents[0]
+            assert isinstance(content, types.TextResourceContents)
+            assert str(content.uri) == "jobs://job/JOB-001"
+            assert content.mime_type == "application/json"
+
+            job = json.loads(content.text)
+            assert isinstance(job, dict)
+            assert job["id"] == "JOB-001"
+            assert set(job) == FULL_JOB_FIELDS
+
+            # Handler exceptions cross the JSON-RPC boundary as MCPError. Assert
+            # the stable protocol shape without coupling to server traceback text.
+            with pytest.raises(MCPError) as unknown_job_error:
+                await session.read_resource("jobs://job/JOB-999")
+
+            assert isinstance(unknown_job_error.value.code, int)
+            assert unknown_job_error.value.message

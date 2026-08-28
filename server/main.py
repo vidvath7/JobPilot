@@ -16,6 +16,12 @@ if __package__:
         CANDIDATE_PROFILE_URI,
         candidate_profile,
     )
+    from .resources.job_details import (
+        JOB_DETAILS_DESCRIPTION,
+        JOB_DETAILS_MIME_TYPE,
+        JOB_DETAILS_URI_TEMPLATE,
+        job_details,
+    )
     from .tools.search_jobs import search_jobs
 else:
     from resources.candidate_profile import (
@@ -23,6 +29,12 @@ else:
         CANDIDATE_PROFILE_MIME_TYPE,
         CANDIDATE_PROFILE_URI,
         candidate_profile,
+    )
+    from resources.job_details import (
+        JOB_DETAILS_DESCRIPTION,
+        JOB_DETAILS_MIME_TYPE,
+        JOB_DETAILS_URI_TEMPLATE,
+        job_details,
     )
     from tools.search_jobs import search_jobs
 
@@ -45,6 +57,16 @@ mcp.resource(
     description=CANDIDATE_PROFILE_DESCRIPTION,
     mime_type=CANDIDATE_PROFILE_MIME_TYPE,
 )(candidate_profile)
+
+# The ``{job_id}`` variable makes this a Resource Template. During a concrete
+# read, MCP extracts that URI segment and supplies it to the matching handler
+# parameter before the adapter delegates to ordinary application logic.
+mcp.resource(
+    JOB_DETAILS_URI_TEMPLATE,
+    name="job_details",
+    description=JOB_DETAILS_DESCRIPTION,
+    mime_type=JOB_DETAILS_MIME_TYPE,
+)(job_details)
 
 
 if __name__ == "__main__":

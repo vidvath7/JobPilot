@@ -15,6 +15,10 @@ from typing import Any
 _SUMMARY_FIELDS = ("id", "title", "company", "location", "experience_level")
 
 
+class JobNotFoundError(LookupError):
+    """Raised when a deterministic JobPilot job ID is not present."""
+
+
 class JobService:
     """Load, validate, and deterministically search the local jobs dataset."""
 
@@ -70,6 +74,21 @@ class JobService:
             summaries.append({field: job[field] for field in _SUMMARY_FIELDS})
 
         return summaries
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        """Return the complete record for an exact job ID.
+
+        Only surrounding whitespace is normalized. Keeping the identifier match
+        case-sensitive and literal prevents fuzzy behavior from entering the data
+        access layer and makes Resource reads reproducible.
+        """
+        normalized_job_id = job_id.strip()
+
+        for job in self._load_jobs():
+            if job["id"] == normalized_job_id:
+                return job
+
+        raise JobNotFoundError(f"Unknown JobPilot job ID: {normalized_job_id}")
 
     def _load_jobs(self) -> list[dict[str, Any]]:
         """Parse JSON and validate only the structure needed for safe searching.
