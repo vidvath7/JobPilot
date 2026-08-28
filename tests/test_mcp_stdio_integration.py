@@ -6,6 +6,7 @@ so failures expose initialization, schema, serialization, or transport problems.
 """
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -89,3 +90,58 @@ def _jobs_from_result(result: object) -> list[dict[str, str]]:
     assert isinstance(jobs, list)
     assert all(isinstance(job, dict) for job in jobs)
     return jobs
+
+
+def test_candidate_profile_resource_over_mcp_stdio() -> None:
+    """Discover and read the candidate profile through a real MCP session."""
+    asyncio.run(_exercise_candidate_profile_resource_over_mcp_stdio())
+
+
+async def _exercise_candidate_profile_resource_over_mcp_stdio() -> None:
+    """Validate the Resource lifecycle without importing its Python adapter."""
+    server_parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "server.main"],
+        cwd=PROJECT_ROOT,
+    )
+
+    async with stdio_client(server_parameters) as (read_stream, write_stream):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=10.0,
+        ) as session:
+            await session.initialize()
+
+            # Resource discovery proves the metadata crossed the protocol rather
+            # than being inspected from the in-process MCPServer registry.
+            resources_result = await session.list_resources()
+            assert len(resources_result.resources) == 1
+            resource = resources_result.resources[0]
+            assert str(resource.uri) == "candidate://profile"
+            assert resource.mime_type == "application/json"
+
+            # read_resource() is the MCP operation for retrieving addressable
+            # context; it is deliberately distinct from invoking a Tool.
+            read_result = await session.read_resource("candidate://profile")
+            assert isinstance(read_result, types.ReadResourceResult)
+            assert read_result.result_type == "complete"
+            assert len(read_result.contents) == 1
+
+            content = read_result.contents[0]
+            assert isinstance(content, types.TextResourceContents)
+            assert str(content.uri) == "candidate://profile"
+            assert content.mime_type == "application/json"
+
+            profile = json.loads(content.text)
+            assert isinstance(profile, dict)
+            assert {
+                "name",
+                "summary",
+                "skills",
+                "experience",
+                "education",
+                "preferred_roles",
+                "preferred_locations",
+                "preferred_experience_levels",
+            } <= profile.keys()

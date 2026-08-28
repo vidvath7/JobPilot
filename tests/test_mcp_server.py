@@ -51,3 +51,16 @@ def test_server_registers_search_jobs_tool() -> None:
     assert "optional role, location, and experience-level filters" in (
         registered_tools[0].description or ""
     )
+
+
+def test_server_registers_static_candidate_profile_resource() -> None:
+    """Verify Resource metadata separately from file loading and stdio transport."""
+    registered_resources = asyncio.run(mcp.list_resources())
+    resource_templates = asyncio.run(mcp.list_resource_templates())
+
+    assert len(registered_resources) == 1
+    candidate_profile = registered_resources[0]
+    assert str(candidate_profile.uri) == "candidate://profile"
+    assert candidate_profile.mime_type == "application/json"
+    assert "candidate profile" in (candidate_profile.description or "").casefold()
+    assert resource_templates == []
