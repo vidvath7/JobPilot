@@ -10,8 +10,32 @@ from mcp.server import MCPServer
 # Supporting both import contexts keeps one entry point usable for development
 # tooling and normal package execution without changing the domain layer.
 if __package__:
+    from .resources.candidate_profile import (
+        CANDIDATE_PROFILE_DESCRIPTION,
+        CANDIDATE_PROFILE_MIME_TYPE,
+        CANDIDATE_PROFILE_URI,
+        candidate_profile,
+    )
+    from .resources.job_details import (
+        JOB_DETAILS_DESCRIPTION,
+        JOB_DETAILS_MIME_TYPE,
+        JOB_DETAILS_URI_TEMPLATE,
+        job_details,
+    )
     from .tools.search_jobs import search_jobs
 else:
+    from resources.candidate_profile import (
+        CANDIDATE_PROFILE_DESCRIPTION,
+        CANDIDATE_PROFILE_MIME_TYPE,
+        CANDIDATE_PROFILE_URI,
+        candidate_profile,
+    )
+    from resources.job_details import (
+        JOB_DETAILS_DESCRIPTION,
+        JOB_DETAILS_MIME_TYPE,
+        JOB_DETAILS_URI_TEMPLATE,
+        job_details,
+    )
     from tools.search_jobs import search_jobs
 
 
@@ -23,6 +47,26 @@ mcp = MCPServer(name="jobpilot")
 # Tool. The SDK derives its description and input/output schemas from the
 # callable's docstring and type annotations.
 mcp.add_tool(search_jobs)
+
+# A Resource exposes client-readable context rather than an operation. Because
+# this URI contains no variables, MCP v2 registers it as one static Resource—not
+# a Resource template—and serializes the handler's dictionary as JSON.
+mcp.resource(
+    CANDIDATE_PROFILE_URI,
+    name="candidate_profile",
+    description=CANDIDATE_PROFILE_DESCRIPTION,
+    mime_type=CANDIDATE_PROFILE_MIME_TYPE,
+)(candidate_profile)
+
+# The ``{job_id}`` variable makes this a Resource Template. During a concrete
+# read, MCP extracts that URI segment and supplies it to the matching handler
+# parameter before the adapter delegates to ordinary application logic.
+mcp.resource(
+    JOB_DETAILS_URI_TEMPLATE,
+    name="job_details",
+    description=JOB_DETAILS_DESCRIPTION,
+    mime_type=JOB_DETAILS_MIME_TYPE,
+)(job_details)
 
 
 if __name__ == "__main__":

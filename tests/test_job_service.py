@@ -4,10 +4,13 @@ Direct Python calls are appropriate here because failures should isolate domain
 filtering from Tool registration, serialization, and transport concerns.
 """
 
-from server.services.job_service import JobService
+import pytest
+
+from server.services.job_service import JobNotFoundError, JobService
 
 
 SUMMARY_FIELDS = {"id", "title", "company", "location", "experience_level"}
+FULL_JOB_FIELDS = SUMMARY_FIELDS | {"required_skills", "description", "url"}
 
 
 def test_no_filters_returns_all_synthetic_jobs() -> None:
@@ -67,3 +70,19 @@ def test_results_contain_only_summary_fields() -> None:
     results = JobService().search_jobs()
 
     assert all(set(job) == SUMMARY_FIELDS for job in results)
+
+
+def test_get_job_returns_complete_record_for_exact_id() -> None:
+    """Verify detail lookup preserves fields intentionally omitted from search."""
+    job = JobService().get_job("  JOB-001  ")
+
+    assert job["id"] == "JOB-001"
+    assert set(job) == FULL_JOB_FIELDS
+    assert job["required_skills"]
+    assert job["description"]
+
+
+def test_get_job_raises_explicit_error_for_unknown_id() -> None:
+    """Distinguish an unknown addressable job from a successful empty result."""
+    with pytest.raises(JobNotFoundError):
+        JobService().get_job("JOB-999")
