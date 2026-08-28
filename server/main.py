@@ -22,6 +22,7 @@ if __package__:
         JOB_DETAILS_URI_TEMPLATE,
         job_details,
     )
+    from .tools.score_job_match import score_job_match
     from .tools.search_jobs import search_jobs
 else:
     from resources.candidate_profile import (
@@ -36,6 +37,7 @@ else:
         JOB_DETAILS_URI_TEMPLATE,
         job_details,
     )
+    from tools.score_job_match import score_job_match
     from tools.search_jobs import search_jobs
 
 
@@ -47,6 +49,11 @@ mcp = MCPServer(name="jobpilot")
 # Tool. The SDK derives its description and input/output schemas from the
 # callable's docstring and type annotations.
 mcp.add_tool(search_jobs)
+
+# Matching is an operation over a caller-supplied job ID, so it is exposed as a
+# Tool rather than readable Resource context. The adapter preserves the service's
+# deterministic result contract across the MCP boundary.
+mcp.add_tool(score_job_match)
 
 # A Resource exposes client-readable context rather than an operation. Because
 # this URI contains no variables, MCP v2 registers it as one static Resource—not
