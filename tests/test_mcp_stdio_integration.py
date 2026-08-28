@@ -52,9 +52,10 @@ async def _exercise_search_jobs_over_mcp_stdio() -> None:
             # list_tools() tests protocol discovery—not the server's Python
             # registry—and exposes the generated description and input schema.
             tools_result = await session.list_tools()
-            assert [tool.name for tool in tools_result.tools] == ["search_jobs"]
+            tools_by_name = {tool.name: tool for tool in tools_result.tools}
+            assert set(tools_by_name) == {"search_jobs", "score_job_match"}
 
-            search_tool = tools_result.tools[0]
+            search_tool = tools_by_name["search_jobs"]
             assert "optional role, location, and experience-level filters" in (
                 search_tool.description or ""
             )
@@ -205,3 +206,104 @@ async def _exercise_job_details_resource_template_over_mcp_stdio() -> None:
 
             assert isinstance(unknown_job_error.value.code, int)
             assert unknown_job_error.value.message
+
+
+def test_score_job_match_over_mcp_stdio() -> None:
+    """Discover and invoke deterministic matching through the MCP Tool boundary."""
+    asyncio.run(_exercise_score_job_match_over_mcp_stdio())
+
+
+async def _exercise_score_job_match_over_mcp_stdio() -> None:
+    """Verify Tool schema, structured output, and stable error signaling."""
+    server_parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "server.main"],
+        cwd=PROJECT_ROOT,
+    )
+
+    async with stdio_client(server_parameters) as (read_stream, write_stream):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=10.0,
+        ) as session:
+            await session.initialize()
+
+            tools_result = await session.list_tools()
+            tools_by_name = {tool.name: tool for tool in tools_result.tools}
+            assert set(tools_by_name) == {"search_jobs", "score_job_match"}
+
+            score_tool = tools_by_name["score_job_match"]
+            assert set(score_tool.input_schema["properties"]) == {"job_id"}
+            assert score_tool.input_schema["required"] == ["job_id"]
+
+            result = await session.call_tool(
+                "score_job_match",
+                arguments={"job_id": "JOB-005"},
+            )
+            assert isinstance(result, types.CallToolResult)
+            assert result.result_type == "complete"
+            assert result.is_error is False
+            assert isinstance(result.structured_content, dict)
+
+            match = result.structured_content
+            assert set(match) == {
+                "job_id",
+                "job_title",
+                "company",
+                "score",
+                "weights",
+                "components",
+                "evidence",
+            }
+            assert match["job_id"] == "JOB-005"
+            assert match["score"] == 60.0
+            assert match["weights"] == {
+                "skills": 0.50,
+                "role": 0.20,
+                "experience_level": 0.20,
+                "location": 0.10,
+            }
+            assert match["components"] == {
+                "skills": 80.0,
+                "role": 0.0,
+                "experience_level": 100.0,
+                "location": 0.0,
+            }
+
+            evidence = match["evidence"]
+            assert evidence["matched_required_skills"] == [
+                "Python",
+                "pandas",
+                "SQL",
+                "scikit-learn",
+            ]
+            assert evidence["missing_required_skills"] == ["Statistics"]
+            assert set(evidence["role_match"]) == {
+                "job_role",
+                "matched_preference",
+                "match_type",
+            }
+            assert set(evidence["experience_match"]) == {
+                "job_level",
+                "candidate_preferences",
+                "matched",
+            }
+            assert set(evidence["location_match"]) == {
+                "job_location",
+                "candidate_preferences",
+                "matched_preference",
+                "matched",
+            }
+
+            # Tool execution failures are represented as a completed
+            # CallToolResult with is_error=True, unlike Resource read failures,
+            # which arrive as MCPError exceptions in this SDK version.
+            unknown_job = await session.call_tool(
+                "score_job_match",
+                arguments={"job_id": "JOB-999"},
+            )
+            assert isinstance(unknown_job, types.CallToolResult)
+            assert unknown_job.result_type == "complete"
+            assert unknown_job.is_error is True
+            assert unknown_job.content

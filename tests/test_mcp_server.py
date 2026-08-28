@@ -7,6 +7,7 @@ adapter or registration failures faster to isolate from protocol transport issue
 import asyncio
 from unittest.mock import Mock
 
+import server.tools.score_job_match as score_job_match_module
 import server.tools.search_jobs as search_jobs_module
 from server.main import mcp
 
@@ -42,15 +43,45 @@ def test_search_jobs_tool_delegates_to_job_service(monkeypatch) -> None:
     assert result is expected_result
 
 
+def test_score_job_match_tool_delegates_to_matching_service(monkeypatch) -> None:
+    """Verify the MCP adapter preserves the frozen matching result unchanged."""
+    expected_result = {"job_id": "JOB-005", "score": 60.0}
+    matching_service = Mock()
+    matching_service.score_job_match.return_value = expected_result
+    monkeypatch.setattr(
+        score_job_match_module, "_matching_service", matching_service
+    )
+
+    result = score_job_match_module.score_job_match("JOB-005")
+
+    matching_service.score_job_match.assert_called_once_with("JOB-005")
+    assert result is expected_result
+
+
 def test_server_registers_search_jobs_tool() -> None:
     """Verify discovery metadata is present without starting a transport client."""
     # MCPServer's registry API is asynchronous even for this in-process check.
     registered_tools = asyncio.run(mcp.list_tools())
+    tools_by_name = {tool.name: tool for tool in registered_tools}
 
-    assert [tool.name for tool in registered_tools] == ["search_jobs"]
+    assert set(tools_by_name) == {"search_jobs", "score_job_match"}
     assert "optional role, location, and experience-level filters" in (
-        registered_tools[0].description or ""
+        tools_by_name["search_jobs"].description or ""
     )
+
+
+def test_server_registers_score_job_match_tool() -> None:
+    """Verify the score Tool's required input and discovery description."""
+    registered_tools = asyncio.run(mcp.list_tools())
+    score_tool = next(
+        tool for tool in registered_tools if tool.name == "score_job_match"
+    )
+
+    assert set(score_tool.input_schema["properties"]) == {"job_id"}
+    assert score_tool.input_schema["required"] == ["job_id"]
+    description = (score_tool.description or "").casefold()
+    assert "deterministic weighted scoring" in description
+    assert "component scores and evidence" in description
 
 
 def test_server_registers_static_candidate_profile_resource() -> None:
