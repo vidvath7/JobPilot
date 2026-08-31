@@ -7,6 +7,7 @@ so failures expose initialization, schema, serialization, or transport problems.
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -53,7 +54,11 @@ async def _exercise_search_jobs_over_mcp_stdio() -> None:
             # registry—and exposes the generated description and input schema.
             tools_result = await session.list_tools()
             tools_by_name = {tool.name: tool for tool in tools_result.tools}
-            assert set(tools_by_name) == {"search_jobs", "score_job_match"}
+            assert set(tools_by_name) == {
+                "search_jobs",
+                "score_job_match",
+                "save_application",
+            }
 
             search_tool = tools_by_name["search_jobs"]
             assert "optional role, location, and experience-level filters" in (
@@ -231,7 +236,11 @@ async def _exercise_score_job_match_over_mcp_stdio() -> None:
 
             tools_result = await session.list_tools()
             tools_by_name = {tool.name: tool for tool in tools_result.tools}
-            assert set(tools_by_name) == {"search_jobs", "score_job_match"}
+            assert set(tools_by_name) == {
+                "search_jobs",
+                "score_job_match",
+                "save_application",
+            }
 
             score_tool = tools_by_name["score_job_match"]
             assert set(score_tool.input_schema["properties"]) == {"job_id"}
@@ -307,3 +316,87 @@ async def _exercise_score_job_match_over_mcp_stdio() -> None:
             assert unknown_job.result_type == "complete"
             assert unknown_job.is_error is True
             assert unknown_job.content
+
+
+def test_save_application_over_mcp_stdio(tmp_path: Path) -> None:
+    """Persist through real MCP while isolating the production application store."""
+    applications_path = tmp_path / "applications.json"
+    applications_path.write_text("[]\n", encoding="utf-8")
+
+    asyncio.run(
+        _exercise_save_application_over_mcp_stdio(applications_path)
+    )
+
+
+async def _exercise_save_application_over_mcp_stdio(
+    applications_path: Path,
+) -> None:
+    """Verify discovery, state change, and duplicate error across stdio."""
+    # StdioServerParameters passes this environment to the child server process.
+    # Copying the current environment preserves Python/runtime configuration while
+    # redirecting only JobPilot's mutable application store.
+    server_environment = os.environ.copy()
+    server_environment["JOBPILOT_APPLICATIONS_PATH"] = str(applications_path)
+    server_parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "server.main"],
+        env=server_environment,
+        cwd=PROJECT_ROOT,
+    )
+
+    async with stdio_client(server_parameters) as (read_stream, write_stream):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=10.0,
+        ) as session:
+            await session.initialize()
+
+            tools_result = await session.list_tools()
+            tools_by_name = {tool.name: tool for tool in tools_result.tools}
+            assert set(tools_by_name) == {
+                "search_jobs",
+                "score_job_match",
+                "save_application",
+            }
+
+            save_tool = tools_by_name["save_application"]
+            assert set(save_tool.input_schema["properties"]) == {
+                "job_id",
+                "status",
+                "notes",
+            }
+            assert save_tool.input_schema["required"] == ["job_id"]
+
+            # This call crosses the complete MCP lifecycle and performs a real
+            # write in the injected store; no adapter or service is imported here.
+            result = await session.call_tool(
+                "save_application",
+                arguments={"job_id": "JOB-005"},
+            )
+            assert isinstance(result, types.CallToolResult)
+            assert result.result_type == "complete"
+            assert result.is_error is False
+            assert isinstance(result.structured_content, dict)
+
+            record = result.structured_content
+            assert record["application_id"] == "APP-001"
+            assert record["job_id"] == "JOB-005"
+            assert record["status"] == "applied"
+            assert isinstance(record["applied_at"], str)
+            assert record["applied_at"]
+            assert record["notes"] is None
+
+            # Tool exceptions are converted into completed error results by the
+            # SDK, keeping domain tracebacks behind the protocol boundary.
+            duplicate = await session.call_tool(
+                "save_application",
+                arguments={"job_id": "JOB-005"},
+            )
+            assert isinstance(duplicate, types.CallToolResult)
+            assert duplicate.result_type == "complete"
+            assert duplicate.is_error is True
+            assert duplicate.content
+
+    persisted_records = json.loads(applications_path.read_text(encoding="utf-8"))
+    assert persisted_records == [record]
