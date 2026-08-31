@@ -6,6 +6,7 @@ being exposed as a protocol Tool or Resource in a later step.
 """
 
 import json
+import os
 import re
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from typing import Any
 from server.services.job_service import JobService
 
 
+APPLICATIONS_PATH_ENVIRONMENT_VARIABLE = "JOBPILOT_APPLICATIONS_PATH"
 _ALLOWED_STATUSES = frozenset(
     {"applied", "interview", "rejected", "offer", "withdrawn"}
 )
@@ -46,13 +48,24 @@ class ApplicationService:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         """Configure injectable storage, job validation, and time boundaries."""
-        self._applications_path = (
-            Path(applications_path)
-            if applications_path is not None
-            else Path(__file__).resolve().parents[2]
-            / "data"
-            / "applications.json"
-        )
+        if applications_path is not None:
+            resolved_applications_path = Path(applications_path)
+        else:
+            # Runtime configuration belongs at the shared service-construction
+            # boundary so MCP read and write adapters cannot select different
+            # stores. Explicit constructor injection still takes precedence.
+            configured_path = os.environ.get(
+                APPLICATIONS_PATH_ENVIRONMENT_VARIABLE
+            )
+            resolved_applications_path = (
+                Path(configured_path)
+                if configured_path
+                else Path(__file__).resolve().parents[2]
+                / "data"
+                / "applications.json"
+            )
+
+        self._applications_path = resolved_applications_path
         self._job_service = job_service or JobService()
         self._clock = clock or _utc_now
 

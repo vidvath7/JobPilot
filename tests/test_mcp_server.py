@@ -7,6 +7,7 @@ adapter or registration failures faster to isolate from protocol transport issue
 import asyncio
 from unittest.mock import Mock
 
+import server.resources.applications as applications_module
 import server.tools.save_application as save_application_module
 import server.tools.score_job_match as score_job_match_module
 import server.tools.search_jobs as search_jobs_module
@@ -90,6 +91,23 @@ def test_save_application_tool_delegates_to_application_service(monkeypatch) -> 
     assert result is expected_record
 
 
+def test_applications_resource_delegates_to_application_service(monkeypatch) -> None:
+    """Verify the Resource passes through the service's persisted snapshot."""
+    expected_history = [{"application_id": "APP-001", "job_id": "JOB-005"}]
+    application_service = Mock()
+    application_service.get_applications.return_value = expected_history
+    monkeypatch.setattr(
+        applications_module,
+        "_application_service",
+        application_service,
+    )
+
+    result = applications_module.applications()
+
+    application_service.get_applications.assert_called_once_with()
+    assert result is expected_history
+
+
 def test_server_registers_search_jobs_tool() -> None:
     """Verify discovery metadata is present without starting a transport client."""
     # MCPServer's registry API is asynchronous even for this in-process check.
@@ -145,12 +163,37 @@ def test_server_registers_save_application_tool() -> None:
 def test_server_registers_static_candidate_profile_resource() -> None:
     """Verify Resource metadata separately from file loading and stdio transport."""
     registered_resources = asyncio.run(mcp.list_resources())
+    resources_by_uri = {
+        str(resource.uri): resource for resource in registered_resources
+    }
 
-    assert len(registered_resources) == 1
-    candidate_profile = registered_resources[0]
-    assert str(candidate_profile.uri) == "candidate://profile"
+    assert len(registered_resources) == 2
+    assert set(resources_by_uri) == {
+        "candidate://profile",
+        "applications://all",
+    }
+    candidate_profile = resources_by_uri["candidate://profile"]
     assert candidate_profile.mime_type == "application/json"
     assert "candidate profile" in (candidate_profile.description or "").casefold()
+
+
+def test_server_registers_applications_resource() -> None:
+    """Verify application history is registered as persisted readable context."""
+    registered_resources = asyncio.run(mcp.list_resources())
+    resources_by_uri = {
+        str(resource.uri): resource for resource in registered_resources
+    }
+
+    assert len(registered_resources) == 2
+    assert set(resources_by_uri) == {
+        "candidate://profile",
+        "applications://all",
+    }
+    applications_resource = resources_by_uri["applications://all"]
+    assert applications_resource.mime_type == "application/json"
+    description = (applications_resource.description or "").casefold()
+    assert "application history" in description
+    assert "persisted" in description
 
 
 def test_server_registers_job_details_resource_template() -> None:

@@ -125,9 +125,16 @@ async def _exercise_candidate_profile_resource_over_mcp_stdio() -> None:
             # Resource discovery proves the metadata crossed the protocol rather
             # than being inspected from the in-process MCPServer registry.
             resources_result = await session.list_resources()
-            assert len(resources_result.resources) == 1
-            resource = resources_result.resources[0]
-            assert str(resource.uri) == "candidate://profile"
+            resources_by_uri = {
+                str(resource.uri): resource
+                for resource in resources_result.resources
+            }
+            assert len(resources_result.resources) == 2
+            assert set(resources_by_uri) == {
+                "candidate://profile",
+                "applications://all",
+            }
+            resource = resources_by_uri["candidate://profile"]
             assert resource.mime_type == "application/json"
 
             # read_resource() is the MCP operation for retrieving addressable
@@ -178,9 +185,9 @@ async def _exercise_job_details_resource_template_over_mcp_stdio() -> None:
             await session.initialize()
 
             static_resources = await session.list_resources()
-            assert [str(resource.uri) for resource in static_resources.resources] == [
-                "candidate://profile"
-            ]
+            assert {
+                str(resource.uri) for resource in static_resources.resources
+            } == {"candidate://profile", "applications://all"}
 
             templates_result = await session.list_resource_templates()
             assert len(templates_result.resource_templates) == 1
@@ -368,6 +375,25 @@ async def _exercise_save_application_over_mcp_stdio(
             }
             assert save_tool.input_schema["required"] == ["job_id"]
 
+            resources_result = await session.list_resources()
+            resources_by_uri = {
+                str(resource.uri): resource
+                for resource in resources_result.resources
+            }
+            assert len(resources_result.resources) == 2
+            assert set(resources_by_uri) == {
+                "candidate://profile",
+                "applications://all",
+            }
+            applications_resource = resources_by_uri["applications://all"]
+            assert applications_resource.mime_type == "application/json"
+
+            # Read through MCP before the Tool call to establish the Resource's
+            # empty state without inspecting ApplicationService directly.
+            empty_read = await session.read_resource("applications://all")
+            empty_history = _applications_from_resource_result(empty_read)
+            assert empty_history == []
+
             # This call crosses the complete MCP lifecycle and performs a real
             # write in the injected store; no adapter or service is imported here.
             result = await session.call_tool(
@@ -387,6 +413,14 @@ async def _exercise_save_application_over_mcp_stdio(
             assert record["applied_at"]
             assert record["notes"] is None
 
+            # Reading again through MCP proves the Tool and Resource share the
+            # same persisted store across the protocol boundary.
+            populated_read = await session.read_resource("applications://all")
+            application_history = _applications_from_resource_result(
+                populated_read
+            )
+            assert application_history == [record]
+
             # Tool exceptions are converted into completed error results by the
             # SDK, keeping domain tracebacks behind the protocol boundary.
             duplicate = await session.call_tool(
@@ -400,3 +434,22 @@ async def _exercise_save_application_over_mcp_stdio(
 
     persisted_records = json.loads(applications_path.read_text(encoding="utf-8"))
     assert persisted_records == [record]
+
+
+def _applications_from_resource_result(
+    result: object,
+) -> list[dict[str, object]]:
+    """Decode application history from the MCP v2 Resource response model."""
+    assert isinstance(result, types.ReadResourceResult)
+    assert result.result_type == "complete"
+    assert len(result.contents) == 1
+
+    content = result.contents[0]
+    assert isinstance(content, types.TextResourceContents)
+    assert str(content.uri) == "applications://all"
+    assert content.mime_type == "application/json"
+
+    applications = json.loads(content.text)
+    assert isinstance(applications, list)
+    assert all(isinstance(application, dict) for application in applications)
+    return applications

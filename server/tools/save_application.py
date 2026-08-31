@@ -1,11 +1,10 @@
 """MCP-facing adapter for JobPilot's application persistence capability.
 
-This module owns only the protocol boundary and process-level configuration.
+This module owns only the protocol boundary.
 ``ApplicationService`` remains responsible for validation, IDs, timestamps, and
 JSON persistence so the state-changing behavior stays independently testable.
 """
 
-import os
 from typing import Any
 
 if __package__ == "server.tools":
@@ -14,14 +13,9 @@ else:
     from services.application_service import ApplicationService
 
 
-APPLICATIONS_PATH_ENVIRONMENT_VARIABLE = "JOBPILOT_APPLICATIONS_PATH"
-
-# Resolve the store when the MCP server process starts. Production uses the
-# service's repository-relative default; stdio tests can inject an isolated file
-# through the subprocess environment without changing domain behavior.
-_application_service = ApplicationService(
-    applications_path=os.environ.get(APPLICATIONS_PATH_ENVIRONMENT_VARIABLE)
-)
+# ApplicationService centrally resolves the optional runtime store override. The
+# Resource adapter constructs the same way, keeping both MCP capabilities aligned.
+_application_service = ApplicationService()
 
 
 def save_application(
