@@ -7,6 +7,7 @@ so failures expose initialization, schema, serialization, or transport problems.
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -53,7 +54,11 @@ async def _exercise_search_jobs_over_mcp_stdio() -> None:
             # registry—and exposes the generated description and input schema.
             tools_result = await session.list_tools()
             tools_by_name = {tool.name: tool for tool in tools_result.tools}
-            assert set(tools_by_name) == {"search_jobs", "score_job_match"}
+            assert set(tools_by_name) == {
+                "search_jobs",
+                "score_job_match",
+                "save_application",
+            }
 
             search_tool = tools_by_name["search_jobs"]
             assert "optional role, location, and experience-level filters" in (
@@ -120,9 +125,16 @@ async def _exercise_candidate_profile_resource_over_mcp_stdio() -> None:
             # Resource discovery proves the metadata crossed the protocol rather
             # than being inspected from the in-process MCPServer registry.
             resources_result = await session.list_resources()
-            assert len(resources_result.resources) == 1
-            resource = resources_result.resources[0]
-            assert str(resource.uri) == "candidate://profile"
+            resources_by_uri = {
+                str(resource.uri): resource
+                for resource in resources_result.resources
+            }
+            assert len(resources_result.resources) == 2
+            assert set(resources_by_uri) == {
+                "candidate://profile",
+                "applications://all",
+            }
+            resource = resources_by_uri["candidate://profile"]
             assert resource.mime_type == "application/json"
 
             # read_resource() is the MCP operation for retrieving addressable
@@ -173,9 +185,9 @@ async def _exercise_job_details_resource_template_over_mcp_stdio() -> None:
             await session.initialize()
 
             static_resources = await session.list_resources()
-            assert [str(resource.uri) for resource in static_resources.resources] == [
-                "candidate://profile"
-            ]
+            assert {
+                str(resource.uri) for resource in static_resources.resources
+            } == {"candidate://profile", "applications://all"}
 
             templates_result = await session.list_resource_templates()
             assert len(templates_result.resource_templates) == 1
@@ -231,7 +243,11 @@ async def _exercise_score_job_match_over_mcp_stdio() -> None:
 
             tools_result = await session.list_tools()
             tools_by_name = {tool.name: tool for tool in tools_result.tools}
-            assert set(tools_by_name) == {"search_jobs", "score_job_match"}
+            assert set(tools_by_name) == {
+                "search_jobs",
+                "score_job_match",
+                "save_application",
+            }
 
             score_tool = tools_by_name["score_job_match"]
             assert set(score_tool.input_schema["properties"]) == {"job_id"}
@@ -307,3 +323,133 @@ async def _exercise_score_job_match_over_mcp_stdio() -> None:
             assert unknown_job.result_type == "complete"
             assert unknown_job.is_error is True
             assert unknown_job.content
+
+
+def test_save_application_over_mcp_stdio(tmp_path: Path) -> None:
+    """Persist through real MCP while isolating the production application store."""
+    applications_path = tmp_path / "applications.json"
+    applications_path.write_text("[]\n", encoding="utf-8")
+
+    asyncio.run(
+        _exercise_save_application_over_mcp_stdio(applications_path)
+    )
+
+
+async def _exercise_save_application_over_mcp_stdio(
+    applications_path: Path,
+) -> None:
+    """Verify discovery, state change, and duplicate error across stdio."""
+    # StdioServerParameters passes this environment to the child server process.
+    # Copying the current environment preserves Python/runtime configuration while
+    # redirecting only JobPilot's mutable application store.
+    server_environment = os.environ.copy()
+    server_environment["JOBPILOT_APPLICATIONS_PATH"] = str(applications_path)
+    server_parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "server.main"],
+        env=server_environment,
+        cwd=PROJECT_ROOT,
+    )
+
+    async with stdio_client(server_parameters) as (read_stream, write_stream):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=10.0,
+        ) as session:
+            await session.initialize()
+
+            tools_result = await session.list_tools()
+            tools_by_name = {tool.name: tool for tool in tools_result.tools}
+            assert set(tools_by_name) == {
+                "search_jobs",
+                "score_job_match",
+                "save_application",
+            }
+
+            save_tool = tools_by_name["save_application"]
+            assert set(save_tool.input_schema["properties"]) == {
+                "job_id",
+                "status",
+                "notes",
+            }
+            assert save_tool.input_schema["required"] == ["job_id"]
+
+            resources_result = await session.list_resources()
+            resources_by_uri = {
+                str(resource.uri): resource
+                for resource in resources_result.resources
+            }
+            assert len(resources_result.resources) == 2
+            assert set(resources_by_uri) == {
+                "candidate://profile",
+                "applications://all",
+            }
+            applications_resource = resources_by_uri["applications://all"]
+            assert applications_resource.mime_type == "application/json"
+
+            # Read through MCP before the Tool call to establish the Resource's
+            # empty state without inspecting ApplicationService directly.
+            empty_read = await session.read_resource("applications://all")
+            empty_history = _applications_from_resource_result(empty_read)
+            assert empty_history == []
+
+            # This call crosses the complete MCP lifecycle and performs a real
+            # write in the injected store; no adapter or service is imported here.
+            result = await session.call_tool(
+                "save_application",
+                arguments={"job_id": "JOB-005"},
+            )
+            assert isinstance(result, types.CallToolResult)
+            assert result.result_type == "complete"
+            assert result.is_error is False
+            assert isinstance(result.structured_content, dict)
+
+            record = result.structured_content
+            assert record["application_id"] == "APP-001"
+            assert record["job_id"] == "JOB-005"
+            assert record["status"] == "applied"
+            assert isinstance(record["applied_at"], str)
+            assert record["applied_at"]
+            assert record["notes"] is None
+
+            # Reading again through MCP proves the Tool and Resource share the
+            # same persisted store across the protocol boundary.
+            populated_read = await session.read_resource("applications://all")
+            application_history = _applications_from_resource_result(
+                populated_read
+            )
+            assert application_history == [record]
+
+            # Tool exceptions are converted into completed error results by the
+            # SDK, keeping domain tracebacks behind the protocol boundary.
+            duplicate = await session.call_tool(
+                "save_application",
+                arguments={"job_id": "JOB-005"},
+            )
+            assert isinstance(duplicate, types.CallToolResult)
+            assert duplicate.result_type == "complete"
+            assert duplicate.is_error is True
+            assert duplicate.content
+
+    persisted_records = json.loads(applications_path.read_text(encoding="utf-8"))
+    assert persisted_records == [record]
+
+
+def _applications_from_resource_result(
+    result: object,
+) -> list[dict[str, object]]:
+    """Decode application history from the MCP v2 Resource response model."""
+    assert isinstance(result, types.ReadResourceResult)
+    assert result.result_type == "complete"
+    assert len(result.contents) == 1
+
+    content = result.contents[0]
+    assert isinstance(content, types.TextResourceContents)
+    assert str(content.uri) == "applications://all"
+    assert content.mime_type == "application/json"
+
+    applications = json.loads(content.text)
+    assert isinstance(applications, list)
+    assert all(isinstance(application, dict) for application in applications)
+    return applications

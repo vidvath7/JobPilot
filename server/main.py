@@ -10,6 +10,12 @@ from mcp.server import MCPServer
 # Supporting both import contexts keeps one entry point usable for development
 # tooling and normal package execution without changing the domain layer.
 if __package__:
+    from .resources.applications import (
+        APPLICATIONS_DESCRIPTION,
+        APPLICATIONS_MIME_TYPE,
+        APPLICATIONS_URI,
+        applications,
+    )
     from .resources.candidate_profile import (
         CANDIDATE_PROFILE_DESCRIPTION,
         CANDIDATE_PROFILE_MIME_TYPE,
@@ -22,9 +28,16 @@ if __package__:
         JOB_DETAILS_URI_TEMPLATE,
         job_details,
     )
+    from .tools.save_application import save_application
     from .tools.score_job_match import score_job_match
     from .tools.search_jobs import search_jobs
 else:
+    from resources.applications import (
+        APPLICATIONS_DESCRIPTION,
+        APPLICATIONS_MIME_TYPE,
+        APPLICATIONS_URI,
+        applications,
+    )
     from resources.candidate_profile import (
         CANDIDATE_PROFILE_DESCRIPTION,
         CANDIDATE_PROFILE_MIME_TYPE,
@@ -37,6 +50,7 @@ else:
         JOB_DETAILS_URI_TEMPLATE,
         job_details,
     )
+    from tools.save_application import save_application
     from tools.score_job_match import score_job_match
     from tools.search_jobs import search_jobs
 
@@ -55,6 +69,11 @@ mcp.add_tool(search_jobs)
 # deterministic result contract across the MCP boundary.
 mcp.add_tool(score_job_match)
 
+# Saving is a state-changing operation, so it is exposed as a Tool rather than a
+# Resource. Its adapter delegates persistence and domain validation to
+# ApplicationService and returns the created record across the MCP boundary.
+mcp.add_tool(save_application)
+
 # A Resource exposes client-readable context rather than an operation. Because
 # this URI contains no variables, MCP v2 registers it as one static Resource—not
 # a Resource template—and serializes the handler's dictionary as JSON.
@@ -64,6 +83,16 @@ mcp.resource(
     description=CANDIDATE_PROFILE_DESCRIPTION,
     mime_type=CANDIDATE_PROFILE_MIME_TYPE,
 )(candidate_profile)
+
+# Application history is addressable read-only context. Registering it as a
+# static Resource keeps reads distinct from the state-changing save Tool while
+# both adapters share ApplicationService's runtime-selected JSON store.
+mcp.resource(
+    APPLICATIONS_URI,
+    name="applications",
+    description=APPLICATIONS_DESCRIPTION,
+    mime_type=APPLICATIONS_MIME_TYPE,
+)(applications)
 
 # The ``{job_id}`` variable makes this a Resource Template. During a concrete
 # read, MCP extracts that URI segment and supplies it to the matching handler
