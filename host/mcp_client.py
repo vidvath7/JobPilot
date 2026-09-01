@@ -14,6 +14,8 @@ from types import TracebackType
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
+from host.capabilities import CapabilityCatalog, normalize_capabilities
+
 
 class JobPilotMCPClient:
     """Own one initialized MCP session and its local stdio server subprocess."""
@@ -115,6 +117,21 @@ class JobPilotMCPClient:
     async def list_prompts(self) -> list[types.Prompt]:
         """Discover Prompts and arguments for future Host presentation."""
         return (await self._require_session().list_prompts()).prompts
+
+    async def discover_capabilities(self) -> CapabilityCatalog:
+        """Discover and normalize the complete server surface for Host consumers."""
+        # Reuse the existing operations so lifecycle enforcement and raw MCP
+        # discovery remain defined in one place. No new session is initialized.
+        tools = await self.list_tools()
+        resources = await self.list_resources()
+        resource_templates = await self.list_resource_templates()
+        prompts = await self.list_prompts()
+        return normalize_capabilities(
+            tools=tools,
+            resources=resources,
+            resource_templates=resource_templates,
+            prompts=prompts,
+        )
 
     def _require_session(self) -> ClientSession:
         """Fail clearly when Host code attempts discovery outside its lifecycle."""

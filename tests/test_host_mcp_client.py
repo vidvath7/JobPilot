@@ -55,8 +55,52 @@ async def _exercise_host_client_lifecycle() -> None:
             ("job_id", True)
         ]
 
+        catalog = await client.discover_capabilities()
+        assert len(catalog.tools) == 3
+        assert {tool.name for tool in catalog.tools} == {
+            "search_jobs",
+            "score_job_match",
+            "save_application",
+        }
+        assert len(catalog.resources) == 2
+        assert {resource.uri for resource in catalog.resources} == {
+            "candidate://profile",
+            "applications://all",
+        }
+        assert len(catalog.resource_templates) == 1
+        assert catalog.resource_templates[0].uri_template == "jobs://job/{job_id}"
+        assert len(catalog.prompts) == 1
+
+        normalized_prompt = catalog.prompts[0]
+        assert normalized_prompt.name == "prepare_application"
+        assert "application-preparation workflow" in (
+            normalized_prompt.description or ""
+        ).casefold()
+        assert [
+            (argument.name, argument.required)
+            for argument in normalized_prompt.arguments
+        ] == [("job_id", True)]
+
+        score_tool = next(
+            tool for tool in catalog.tools if tool.name == "score_job_match"
+        )
+        assert set(score_tool.input_schema["properties"]) == {"job_id"}
+        assert score_tool.input_schema["required"] == ["job_id"]
+
+        save_tool = next(
+            tool for tool in catalog.tools if tool.name == "save_application"
+        )
+        assert set(save_tool.input_schema["properties"]) == {
+            "job_id",
+            "status",
+            "notes",
+        }
+        assert save_tool.input_schema["required"] == ["job_id"]
+
     # Returning from the context proves subprocess/session cleanup completed; the
     # disconnected guard also prevents accidental reuse of a closed SDK session.
     assert client.is_connected is False
     with pytest.raises(RuntimeError, match="not connected"):
         await client.list_tools()
+    with pytest.raises(RuntimeError, match="not connected"):
+        await client.discover_capabilities()
