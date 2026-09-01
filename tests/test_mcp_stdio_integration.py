@@ -453,3 +453,70 @@ def _applications_from_resource_result(
     assert isinstance(applications, list)
     assert all(isinstance(application, dict) for application in applications)
     return applications
+
+
+def test_prepare_application_prompt_over_mcp_stdio() -> None:
+    """Discover and retrieve instructions through the real MCP Prompt lifecycle."""
+    asyncio.run(_exercise_prepare_application_prompt_over_mcp_stdio())
+
+
+async def _exercise_prepare_application_prompt_over_mcp_stdio() -> None:
+    """Verify Prompt metadata, result structure, guidance, and argument errors."""
+    server_parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "server.main"],
+        cwd=PROJECT_ROOT,
+    )
+
+    async with stdio_client(server_parameters) as (read_stream, write_stream):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=10.0,
+        ) as session:
+            await session.initialize()
+
+            # list_prompts() discovers reusable instruction templates separately
+            # from operational Tools and addressable Resources.
+            prompts_result = await session.list_prompts()
+            assert len(prompts_result.prompts) == 1
+            prompt = prompts_result.prompts[0]
+            assert prompt.name == "prepare_application"
+            assert "application-preparation workflow" in (
+                prompt.description or ""
+            ).casefold()
+            assert prompt.arguments is not None
+            assert [argument.name for argument in prompt.arguments] == ["job_id"]
+            assert prompt.arguments[0].required is True
+
+            # get_prompt() only renders server-provided instructions. It does not
+            # invoke the Tools or Resources named inside those instructions.
+            result = await session.get_prompt(
+                "prepare_application",
+                arguments={"job_id": "JOB-005"},
+            )
+            assert isinstance(result, types.GetPromptResult)
+            assert result.result_type == "complete"
+            assert result.messages
+
+            message = result.messages[0]
+            assert message.role == "user"
+            assert isinstance(message.content, types.TextContent)
+            guidance = message.content.text.casefold()
+            assert "job-005" in guidance
+            assert "candidate profile" in guidance
+            assert "job details" in guidance
+            assert "match evidence" in guidance
+            assert "strong candidate-job matches" in guidance
+            assert "gaps" in guidance and "missing requirements" in guidance
+            assert "do not fabricate" in guidance
+            assert "resume-tailoring guidance" in guidance
+            assert "cover-letter guidance" in guidance
+
+            # Missing required Prompt arguments are rejected at the stable MCP
+            # request boundary; avoid coupling to validation wording.
+            with pytest.raises(MCPError) as missing_argument_error:
+                await session.get_prompt("prepare_application", arguments={})
+
+            assert isinstance(missing_argument_error.value.code, int)
+            assert missing_argument_error.value.message

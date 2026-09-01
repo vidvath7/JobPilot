@@ -205,3 +205,31 @@ def test_server_registers_job_details_resource_template() -> None:
     assert job_details.uri_template == "jobs://job/{job_id}"
     assert job_details.mime_type == "application/json"
     assert "full details" in (job_details.description or "").casefold()
+
+
+def test_server_registers_prepare_application_prompt() -> None:
+    """Verify Prompt discovery exposes one required workflow argument."""
+    registered_prompts = asyncio.run(mcp.list_prompts())
+
+    assert len(registered_prompts) == 1
+    prompt = registered_prompts[0]
+    assert prompt.name == "prepare_application"
+    assert "application-preparation workflow" in (
+        prompt.description or ""
+    ).casefold()
+    assert prompt.arguments is not None
+    assert [(argument.name, argument.required) for argument in prompt.arguments] == [
+        ("job_id", True)
+    ]
+
+    # Prompt registration must not change the established operational surface.
+    assert {
+        tool.name for tool in asyncio.run(mcp.list_tools())
+    } == {"search_jobs", "score_job_match", "save_application"}
+    assert {
+        str(resource.uri) for resource in asyncio.run(mcp.list_resources())
+    } == {"candidate://profile", "applications://all"}
+    assert {
+        template.uri_template
+        for template in asyncio.run(mcp.list_resource_templates())
+    } == {"jobs://job/{job_id}"}
