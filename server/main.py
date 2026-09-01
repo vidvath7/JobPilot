@@ -10,6 +10,11 @@ from mcp.server import MCPServer
 # Supporting both import contexts keeps one entry point usable for development
 # tooling and normal package execution without changing the domain layer.
 if __package__:
+    from .prompts.prepare_application import (
+        PREPARE_APPLICATION_DESCRIPTION,
+        PREPARE_APPLICATION_NAME,
+        prepare_application,
+    )
     from .resources.applications import (
         APPLICATIONS_DESCRIPTION,
         APPLICATIONS_MIME_TYPE,
@@ -32,6 +37,11 @@ if __package__:
     from .tools.score_job_match import score_job_match
     from .tools.search_jobs import search_jobs
 else:
+    from prompts.prepare_application import (
+        PREPARE_APPLICATION_DESCRIPTION,
+        PREPARE_APPLICATION_NAME,
+        prepare_application,
+    )
     from resources.applications import (
         APPLICATIONS_DESCRIPTION,
         APPLICATIONS_MIME_TYPE,
@@ -73,6 +83,14 @@ mcp.add_tool(score_job_match)
 # Resource. Its adapter delegates persistence and domain validation to
 # ApplicationService and returns the created record across the MCP boundary.
 mcp.add_tool(save_application)
+
+# A Prompt publishes reusable model-facing instructions; retrieving it does not
+# execute Tools, read Resources, or call a model. A future Host will orchestrate
+# the capabilities referenced by these instructions.
+mcp.prompt(
+    name=PREPARE_APPLICATION_NAME,
+    description=PREPARE_APPLICATION_DESCRIPTION,
+)(prepare_application)
 
 # A Resource exposes client-readable context rather than an operation. Because
 # this URI contains no variables, MCP v2 registers it as one static Resource—not
