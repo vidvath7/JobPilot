@@ -5,6 +5,8 @@ description = "A learning-focused job application assistant built with the Model
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]",
+    "openai>=3.8.0",
+    "python-dotenv>=1.2.3",
 ]
 
 [dependency-groups]

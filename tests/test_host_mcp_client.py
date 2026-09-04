@@ -5,8 +5,10 @@ the Host boundary without importing or invoking server capability handlers.
 """
 
 import asyncio
+import json
 
 import pytest
+from mcp import types
 
 from host.mcp_client import JobPilotMCPClient
 
@@ -97,6 +99,42 @@ async def _exercise_host_client_lifecycle() -> None:
         }
         assert save_tool.input_schema["required"] == ["job_id"]
 
+        # These generic calls prove the Host can execute discovered capabilities
+        # without importing server adapters or adding JobPilot-specific methods.
+        search_result = await client.call_tool(
+            "search_jobs",
+            {"role": "AI Engineer"},
+        )
+        assert isinstance(search_result, types.CallToolResult)
+        assert search_result.is_error is False
+        assert isinstance(search_result.structured_content, dict)
+        assert search_result.structured_content["result"]
+
+        score_result = await client.call_tool(
+            "score_job_match",
+            {"job_id": "JOB-005"},
+        )
+        assert isinstance(score_result, types.CallToolResult)
+        assert score_result.is_error is False
+        assert score_result.structured_content is not None
+        assert score_result.structured_content["score"] == 60.0
+
+        resource_result = await client.read_resource("candidate://profile")
+        assert isinstance(resource_result, types.ReadResourceResult)
+        resource_content = resource_result.contents[0]
+        assert isinstance(resource_content, types.TextResourceContents)
+        assert isinstance(json.loads(resource_content.text), dict)
+
+        prompt_result = await client.get_prompt(
+            "prepare_application",
+            {"job_id": "JOB-005"},
+        )
+        assert isinstance(prompt_result, types.GetPromptResult)
+        assert prompt_result.messages
+        prompt_content = prompt_result.messages[0].content
+        assert isinstance(prompt_content, types.TextContent)
+        assert "JOB-005" in prompt_content.text
+
     # Returning from the context proves subprocess/session cleanup completed; the
     # disconnected guard also prevents accidental reuse of a closed SDK session.
     assert client.is_connected is False
@@ -104,3 +142,9 @@ async def _exercise_host_client_lifecycle() -> None:
         await client.list_tools()
     with pytest.raises(RuntimeError, match="not connected"):
         await client.discover_capabilities()
+    with pytest.raises(RuntimeError, match="not connected"):
+        await client.call_tool("any_tool")
+    with pytest.raises(RuntimeError, match="not connected"):
+        await client.read_resource("any://resource")
+    with pytest.raises(RuntimeError, match="not connected"):
+        await client.get_prompt("any_prompt")

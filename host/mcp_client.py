@@ -133,6 +133,29 @@ class JobPilotMCPClient:
             prompts=prompts,
         )
 
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, object] | None = None,
+    ) -> types.CallToolResult | types.InputRequiredResult | types.Result:
+        """Invoke any named Tool through MCP and preserve the SDK result object."""
+        return await self._require_session().call_tool(name, arguments)
+
+    async def read_resource(
+        self,
+        uri: str,
+    ) -> types.ReadResourceResult | types.InputRequiredResult:
+        """Read any Resource URI through MCP without interpreting its content."""
+        return await self._require_session().read_resource(uri)
+
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, str] | None = None,
+    ) -> types.GetPromptResult | types.InputRequiredResult:
+        """Retrieve any named Prompt while preserving MCP message structures."""
+        return await self._require_session().get_prompt(name, arguments)
+
     def _require_session(self) -> ClientSession:
         """Fail clearly when Host code attempts discovery outside its lifecycle."""
         if self._session is None:
