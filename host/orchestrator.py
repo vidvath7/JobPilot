@@ -1,4 +1,4 @@
-"""Host-owned, single-round coordination between LLM selection and MCP execution.
+"""Host-owned, bounded coordination between LLM selection and MCP execution.
 
 Discovery supplies schemas; explicit Host policy supplies permission. Neither
 the provider adapter nor the MCP transport decides which operations may run.
@@ -38,14 +38,14 @@ class ExecutedToolCall:
 
 @dataclass(frozen=True)
 class OrchestrationResult:
-    """Final model content and ordered evidence of the one execution round."""
+    """Final model content and ordered evidence across all execution rounds."""
 
     answer: str | None
     executed_tool_calls: tuple[ExecutedToolCall, ...]
 
 
 class JobPilotOrchestrator:
-    """Use an already connected MCP client for at most one round per request."""
+    """Reuse a connected MCP client within a finite Tool-round budget."""
 
     def __init__(
         self,
@@ -54,7 +54,11 @@ class JobPilotOrchestrator:
         catalog: CapabilityCatalog,
         *,
         allowed_tools: Iterable[str],
+        max_tool_rounds: int = 3,
     ) -> None:
+        if type(max_tool_rounds) is not int or max_tool_rounds < 1:
+            raise ValueError("max_tool_rounds must be a positive integer.")
+        self._max_tool_rounds = max_tool_rounds
         self._llm = llm_client
         self._mcp = mcp_client
         self._allowed = frozenset(allowed_tools)
@@ -65,65 +69,77 @@ class JobPilotOrchestrator:
         )
 
     async def ask(self, user_message: str) -> OrchestrationResult:
-        """Select, validate, execute in order, summarize once, then stop."""
+        """Keep complete history while bounding execution and rejecting repeats."""
         if not user_message.strip():
             raise OrchestrationError("A non-empty user request is required.")
         messages: list[LLMMessage] = [{"role": "user", "content": user_message}]
-        first = await self._complete(messages, tools=self._tools, tool_choice="auto")
-        if not first.tool_calls:
-            return OrchestrationResult(first.content, ())
-
-        # Validate the entire batch before any execution, including correlation
-        # IDs needed to pair each continuation result with its model request.
         ids: set[str] = set()
-        for call in first.tool_calls:
-            if call.name not in self._discovered:
-                raise OrchestrationError(f"Model requested unknown Tool: {call.name}")
-            if call.name not in self._allowed:
-                raise OrchestrationError(f"Tool disallowed by automatic policy: {call.name}")
-            if not call.id or call.id in ids:
-                raise OrchestrationError("Model returned missing or duplicate Tool-call IDs.")
-            ids.add(call.id)
+        executed_keys: set[tuple[str, str]] = set()
+        executed: list[ExecutedToolCall] = []
 
-        messages.append({
-            "role": "assistant",
-            "content": first.content,
-            "tool_calls": [
-                {"id": call.id, "type": "function", "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments),
-                }} for call in first.tool_calls
-            ],
-        })
-        executed = []
-        for call in first.tool_calls:
-            try:
-                raw = await self._mcp.call_tool(call.name, deepcopy(call.arguments))
-            except Exception as error:
-                # Keep provider/transport diagnostics out of normal user output.
-                # Cancellation inherits BaseException and still propagates.
+        # The extra completion can return the final answer after the last allowed
+        # batch. A Tool request there is rejected before any further MCP operation.
+        for rounds_used in range(self._max_tool_rounds + 1):
+            response = await self._complete(
+                messages, tools=self._tools, tool_choice="auto",
+            )
+            if not response.tool_calls:
+                return OrchestrationResult(response.content, tuple(executed))
+            if rounds_used == self._max_tool_rounds:
                 raise OrchestrationError(
-                    f"MCP execution failed for {call.name} ({type(error).__name__})."
-                ) from error
-            if not isinstance(raw, types.CallToolResult):
-                raise OrchestrationError("MCP returned an unsupported Tool result.")
-            result = _tool_result_value(raw)
-            is_error = raw.is_error is True
-            executed.append(ExecutedToolCall(
-                call.id, call.name, deepcopy(call.arguments), result, is_error,
-            ))
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps({"is_error": is_error, "result": result}),
-            })
+                    f"Maximum Tool rounds exceeded ({self._max_tool_rounds})."
+                )
 
-        # No Tool definitions on this completion: this is a terminal summary,
-        # not a recursive agent loop, even if the provider requests more calls.
-        final = await self._complete(messages)
-        if final.tool_calls:
-            raise OrchestrationError("Second model response requested another Tool round.")
-        return OrchestrationResult(final.content, tuple(executed))
+            # Validate the whole batch before execution. IDs remain unique across
+            # history; repetition compares exact JSON values, not semantic intent.
+            batch_keys = []
+            for call in response.tool_calls:
+                if call.name not in self._discovered:
+                    raise OrchestrationError(f"Model requested unknown Tool: {call.name}")
+                if call.name not in self._allowed:
+                    raise OrchestrationError(f"Tool disallowed by automatic policy: {call.name}")
+                if not isinstance(call.id, str) or not call.id.strip() or call.id in ids:
+                    raise OrchestrationError("Model returned missing or duplicate Tool-call IDs.")
+                ids.add(call.id)
+                key = (call.name, json.dumps(
+                    call.arguments, sort_keys=True, separators=(",", ":"), allow_nan=False,
+                ))
+                if key in executed_keys:
+                    raise OrchestrationError(f"Identical Tool call repeated: {call.name}.")
+                batch_keys.append(key)
+
+            messages.append({
+                "role": "assistant",
+                "content": response.content,
+                "tool_calls": [
+                    {"id": call.id, "type": "function", "function": {
+                        "name": call.name,
+                        "arguments": json.dumps(call.arguments),
+                    }} for call in response.tool_calls
+                ],
+            })
+            for call, key in zip(response.tool_calls, batch_keys):
+                try:
+                    raw = await self._mcp.call_tool(call.name, deepcopy(call.arguments))
+                except Exception as error:
+                    # Cancellation still propagates; ordinary protocol/transport
+                    # failures become safe Host errors rather than fake success.
+                    raise OrchestrationError(
+                        f"MCP execution failed for {call.name} ({type(error).__name__})."
+                    ) from error
+                if not isinstance(raw, types.CallToolResult):
+                    raise OrchestrationError("MCP returned an unsupported Tool result.")
+                result = _tool_result_value(raw)
+                is_error = raw.is_error is True
+                executed.append(ExecutedToolCall(
+                    call.id, call.name, deepcopy(call.arguments), result, is_error,
+                ))
+                executed_keys.add(key)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": json.dumps({"is_error": is_error, "result": result}),
+                })
 
     async def _complete(self, messages, **kwargs):
         """Translate provider failures into a recoverable, credential-safe Host error."""

@@ -1,4 +1,4 @@
-"""Manual live observation of one permitted LLM/MCP execution round per query."""
+"""Manual live observation of bounded, read-only LLM/MCP Tool rounds."""
 
 import asyncio
 import json
@@ -33,7 +33,8 @@ async def run() -> None:
             result = await orchestrator.ask(query)
             for call in result.executed_tool_calls:
                 print(f"Tool: {call.name} {json.dumps(call.arguments)}")
-                print(f"is_error: {call.is_error}; result: {json.dumps(call.result)}")
+                print(f"is_error: {call.is_error}")
+                print(f"result: {json.dumps(call.result)}")
             print(f"Answer: {result.answer}", flush=True)
 
 

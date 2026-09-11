@@ -42,7 +42,7 @@ class FakeMCP:
         return self.result
 
 
-def make_orchestrator(llm, mcp):
+def make_orchestrator(llm, mcp, max_tool_rounds=3):
     """Include a disallowed discovered Tool to exercise both policy boundaries."""
     catalog = CapabilityCatalog(
         tools=tuple(ToolCapability(name, name, {
@@ -51,7 +51,10 @@ def make_orchestrator(llm, mcp):
         }) for name in ("search_jobs", "score_job_match", "save_application")),
         resources=(), resource_templates=(), prompts=(),
     )
-    return JobPilotOrchestrator(llm, mcp, catalog, allowed_tools=AUTO_EXECUTABLE_TOOLS)
+    return JobPilotOrchestrator(
+        llm, mcp, catalog, allowed_tools=AUTO_EXECUTABLE_TOOLS,
+        max_tool_rounds=max_tool_rounds,
+    )
 
 
 def selection(*names):
@@ -90,7 +93,7 @@ def test_result_continuation_and_terminal_answer(structured, is_error):
     assert mcp.calls == [("score_job_match", {"job_id": "JOB-005"})]
     assert result.answer == "Final answer"
     messages, options = llm.requests[1]
-    assert options == {}  # No schemas or Tool-selection options in round two.
+    assert options == llm.requests[0][1]  # Permitted schemas remain available.
     assert messages[0] == {"role": "user", "content": "Score this job"}
     call = messages[1]["tool_calls"][0]
     assert json.loads(call["function"]["arguments"]) == {"job_id": "JOB-005"}
@@ -120,12 +123,92 @@ def test_multiple_calls_keep_provider_order_and_result_ids():
     assert [message["tool_call_id"] for message in llm.requests[1][0][2:]] == ["0", "1"]
 
 
-def test_second_round_calls_never_execute():
-    """The terminal completion cannot reopen execution, even for an allowed Tool."""
-    llm, mcp = FakeLLM(selection("search_jobs"), selection("score_job_match")), FakeMCP()
-    with pytest.raises(OrchestrationError, match="another Tool round"):
+def search_response(call_id, **arguments):
+    """Give each round a distinct protocol ID, independently of search arguments."""
+    return LLMResponse(None, (LLMToolCall(call_id, "search_jobs", arguments),))
+
+
+@pytest.mark.parametrize("round_count", [2, 3])
+def test_multiple_rounds_preserve_history_policy_and_execution_order(round_count):
+    """Different literal search arguments may recover while every result stays in history."""
+    roles = ["GenAI", "AI Engineer", "Applied AI Engineer"][:round_count]
+    llm = FakeLLM(
+        *(search_response(str(i), role=role) for i, role in enumerate(roles)),
+        LLMResponse("Found jobs", ()),
+    )
+    mcp = FakeMCP()
+    result = asyncio.run(make_orchestrator(llm, mcp).ask("Find jobs"))
+    assert result.answer == "Found jobs"
+    assert mcp.calls == [("search_jobs", {"role": role}) for role in roles]
+    assert [call.arguments["role"] for call in result.executed_tool_calls] == roles
+    assert len(llm.requests) == round_count + 1
+    for index, (messages, options) in enumerate(llm.requests):
+        assert len(messages) == 1 + index * 2
+        assert messages[0] == {"role": "user", "content": "Find jobs"}
+        assert {tool["function"]["name"] for tool in options["tools"]} == AUTO_EXECUTABLE_TOOLS
+        assert options["tool_choice"] == "auto"
+        if index:
+            previous = llm.requests[index - 1][0]
+            assert messages[:len(previous)] == previous
+            assert messages[-1]["tool_call_id"] == str(index - 1)
+            assert json.loads(messages[-1]["content"])["result"] == {"score": 60.0}
+
+
+@pytest.mark.parametrize("limit", [1, 3])
+def test_round_limit_rejects_extra_batch_before_execution(limit):
+    """A response after the configured budget may answer but cannot execute more Tools."""
+    llm = FakeLLM(*(search_response(str(i), role=str(i)) for i in range(limit + 1)))
+    mcp = FakeMCP()
+    with pytest.raises(OrchestrationError, match=f"Maximum Tool rounds exceeded \\({limit}\\)"):
+        asyncio.run(make_orchestrator(llm, mcp, limit).ask("Find"))
+    assert len(mcp.calls) == limit
+    assert len(llm.requests) == limit + 1
+
+
+def test_identical_call_rejected_despite_argument_key_order():
+    """Canonical JSON recognizes exact repeats without treating new arguments as aliases."""
+    llm = FakeLLM(
+        search_response("one", role="GenAI", location="Germany"),
+        search_response("two", location="Germany", role="GenAI"),
+    )
+    mcp = FakeMCP()
+    with pytest.raises(OrchestrationError, match="Identical Tool call repeated"):
         asyncio.run(make_orchestrator(llm, mcp).ask("Find"))
-    assert len(mcp.calls) == 1 and len(llm.requests) == 2
+    assert len(mcp.calls) == 1
+
+
+def test_multiple_calls_count_as_one_round():
+    """The budget counts model batches, not the number of operations in a batch."""
+    llm = FakeLLM(selection("search_jobs", "score_job_match"), LLMResponse("Done", ()))
+    mcp = FakeMCP()
+    result = asyncio.run(make_orchestrator(llm, mcp, 1).ask("Find"))
+    assert len(result.executed_tool_calls) == 2
+    assert result.answer == "Done"
+
+
+def test_later_disallowed_call_still_rejected():
+    """Successful earlier rounds never broaden automatic Tool permission."""
+    llm = FakeLLM(search_response("one", role="AI"), selection("save_application"))
+    mcp = FakeMCP()
+    with pytest.raises(OrchestrationError, match="disallowed"):
+        asyncio.run(make_orchestrator(llm, mcp).ask("Find"))
+    assert len(mcp.calls) == 1
+
+
+def test_duplicate_call_ids_across_history_rejected():
+    """Even different operations must have unambiguous result correlation IDs."""
+    llm = FakeLLM(search_response("same", role="AI"), search_response("same", role="ML"))
+    mcp = FakeMCP()
+    with pytest.raises(OrchestrationError, match="duplicate Tool-call IDs"):
+        asyncio.run(make_orchestrator(llm, mcp).ask("Find"))
+    assert len(mcp.calls) == 1
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
+def test_invalid_round_limits_rejected(limit):
+    """Invalid configuration must fail before any provider or MCP activity."""
+    with pytest.raises(ValueError, match="positive integer"):
+        make_orchestrator(FakeLLM(), FakeMCP(), limit)
 
 
 def test_protocol_failure_stops_before_summary():
