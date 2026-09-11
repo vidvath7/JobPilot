@@ -5,6 +5,7 @@ the human-facing Host layer without starting stdio or requiring manual input.
 """
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 from mcp import types
@@ -25,6 +26,7 @@ from host.main import (
     format_prompts,
     run_repl,
 )
+from host.orchestrator import ExecutedToolCall, OrchestrationResult, OrchestrationError
 
 
 class FakeMCPClient:
@@ -142,7 +144,7 @@ def test_help_lists_exact_supported_commands() -> None:
     """Keep the documented command surface aligned with the deterministic parser."""
     help_output = format_help()
 
-    for command in ("help", "capabilities", "prompts", "quit", "exit"):
+    for command in ("help", "capabilities", "prompts", "ask", "quit", "exit"):
         assert command in help_output
 
 
@@ -381,3 +383,29 @@ def _run_commands(
         )
     )
     return "\n".join(output)
+
+
+def test_ask_routes_text_and_survives_errors(catalog):
+    """CLI routes intact user text; policy errors leave later commands usable."""
+    orchestrator = AsyncMock()
+    orchestrator.ask.side_effect = [
+        OrchestrationError("Tool disallowed"),
+        OrchestrationResult("Here are the jobs.", (
+            ExecutedToolCall("1", "search_jobs", {"role": "AI Engineer"}, [], False),
+        )),
+    ]
+    commands = iter(["ask   ", "ask first request", "ask Find AI Engineer jobs", "help", "quit"])
+    output = []
+    asyncio.run(run_repl(
+        catalog, FakeMCPClient(), orchestrator=orchestrator,
+        input_function=lambda _: next(commands), output_function=output.append,
+    ))
+    assert [call.args[0] for call in orchestrator.ask.call_args_list] == [
+        "first request", "Find AI Engineer jobs",
+    ]
+    rendered = "\n".join(output)
+    assert "Usage: ask" in rendered
+    assert "Orchestration error: Tool disallowed" in rendered
+    assert 'search_jobs {"role": "AI Engineer"}' in rendered
+    assert "Here are the jobs." in rendered and "Available commands:" in rendered
+    assert "CallToolResult" not in rendered and "Traceback" not in rendered

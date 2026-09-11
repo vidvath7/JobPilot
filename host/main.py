@@ -1,6 +1,6 @@
 """Minimal interactive Host for viewing dynamically discovered MCP capabilities.
 
-The CLI makes MCP discovery visible to a human without executing capabilities.
+The CLI exposes discovery, manual MCP operations, and controlled LLM requests.
 It performs one catalog discovery at startup, then renders that immutable snapshot
 for the lifetime of the REPL session.
 """
@@ -19,6 +19,10 @@ from host.capabilities import (
     PromptCapability,
 )
 from host.mcp_client import JobPilotMCPClient
+from host.nvidia_llm import NVIDIALLMClient
+from host.orchestrator import (
+    AUTO_EXECUTABLE_TOOLS, JobPilotOrchestrator, OrchestrationError,
+)
 
 
 WELCOME_MESSAGE = 'JobPilot Host connected. Type "help" for available commands.'
@@ -42,6 +46,7 @@ def format_help() -> str:
   help          Show this command list.
   capabilities  Show all capabilities discovered from the MCP server.
   prompts       Show discovered Prompt workflows and their arguments.
+  ask <request> Ask the model, for example: ask Find AI Engineer jobs in Germany
   call <tool_name> [<json_object>]
                 Invoke a Tool, for example: call example_tool {"key":"value"}
   read <resource_uri>
@@ -113,6 +118,7 @@ async def run_repl(
     catalog: CapabilityCatalog,
     client: JobPilotMCPClient,
     *,
+    orchestrator: JobPilotOrchestrator | None = None,
     input_function: Callable[[str], str] = input,
     output_function: Callable[[str], None] = print,
 ) -> None:
@@ -145,9 +151,25 @@ async def run_repl(
             await _handle_read(parts, client, output_function)
         elif command == "prompt":
             await _handle_prompt(parts, client, output_function)
+        elif command == "ask":
+            request = command_line.split(maxsplit=1)
+            if len(request) < 2:
+                output_function("Usage: ask <natural-language request>")
+            elif orchestrator is None:
+                output_function("Ask is unavailable: no orchestrator configured.")
+            else:
+                try:
+                    result = await orchestrator.ask(request[1])
+                    for call in result.executed_tool_calls:
+                        state = "error" if call.is_error else "success"
+                        output_function(
+                            f"Tool used ({state}): {call.name} {json.dumps(call.arguments)}"
+                        )
+                    output_function(result.answer or "Model returned no text answer.")
+                except OrchestrationError as error:
+                    output_function(f"Orchestration error: {error}")
         else:
-            # Deliberately avoid fuzzy or natural-language interpretation: command
-            # selection remains deterministic until an LLM milestone approves it.
+            # Only an explicit ask command enters model orchestration.
             output_function(UNKNOWN_COMMAND_MESSAGE)
 
 
@@ -155,7 +177,11 @@ async def run_host() -> None:
     """Connect, discover once, run the REPL, and close the MCP client normally."""
     async with JobPilotMCPClient() as client:
         catalog = await client.discover_capabilities()
-        await run_repl(catalog, client)
+        orchestrator = JobPilotOrchestrator(
+            NVIDIALLMClient(), client, catalog,
+            allowed_tools=AUTO_EXECUTABLE_TOOLS,
+        )
+        await run_repl(catalog, client, orchestrator=orchestrator)
 
 
 async def _handle_call(
