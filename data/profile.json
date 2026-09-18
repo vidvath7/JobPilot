@@ -1,63 +1,189 @@
 {
-  "name": "Alex Morgan",
-  "summary": "Application-focused machine learning engineer with three years of experience building Python services, data pipelines, and production ML features.",
+  "name": "Vidvath Krishna",
+
+  "summary": "AI and machine learning professional with experience in LLM-based document processing, NLP, computer vision, data pipelines, cloud-based AI workflows, and production-oriented machine learning applications.",
+
   "skills": [
     "Python",
-    "PyTorch",
-    "scikit-learn",
-    "FastAPI",
     "SQL",
+    "PyTorch",
+    "TensorFlow",
+    "Keras",
+    "scikit-learn",
     "pandas",
     "NumPy",
-    "Docker",
-    "Git",
-    "REST APIs"
+    "LangChain",
+    "RAG",
+    "LLMs",
+    "NLP",
+    "Computer Vision",
+    "Machine Learning",
+    "Deep Learning",
+    "Data Analysis",
+    "Data Preparation",
+    "Predictive Modeling",
+    "Statistical Analysis",
+    "FastAPI",
+    "Flask",
+    "REST APIs",
+    "Streamlit",
+    "React",
+    "TypeScript",
+    "GitLab",
+    "Jenkins",
+    "Azure DevOps",
+    "Microsoft Azure",
+    "AWS Lambda",
+    "Amazon S3",
+    "Amazon Aurora",
+    "Amazon Textract",
+    "Amazon Bedrock"
   ],
+
   "experience": [
     {
-      "role": "Machine Learning Engineer",
-      "company": "Northstar Analytics Lab",
-      "location": "Berlin, Germany",
-      "start_year": 2023,
-      "end_year": 2026,
+      "role": "Working Student AI",
+      "company": "Tenthpin",
+      "location": "Eschborn, Germany (Remote)",
+      "start_year": 2024,
+      "end_year": null,
       "highlights": [
-        "Built and evaluated PyTorch and scikit-learn models for document classification.",
-        "Deployed model-backed APIs with FastAPI and Docker.",
-        "Created SQL and pandas pipelines for reproducible training datasets."
+        "Contributed to the development of an AI-driven Certificate Verification application within an agile, cross-functional team.",
+        "Researched and evaluated state-of-the-art AI techniques for document processing.",
+        "Contributed to technical design discussions and secure, reliable LLM prompt design.",
+        "Designed and refined LLM prompts for accurate data extraction, normalization, and comparison.",
+        "Used AWS Lambda, S3, Aurora, Bedrock, and Textract to build scalable AI-integrated document workflows.",
+        "Defined and curated datasets for functional and performance testing, including synthetic documents and client samples.",
+        "Supported demo preparation, bug fixing, and end-to-end testing to improve system accuracy, stability, and resilience."
       ]
     },
+
     {
-      "role": "Software Engineering Intern",
-      "company": "Cedar Systems Studio",
-      "location": "Hamburg, Germany",
-      "start_year": 2022,
+      "role": "Student Research Assistant",
+      "company": "Otto-von-Guericke University",
+      "location": "Magdeburg, Germany (Remote)",
+      "start_year": 2024,
+      "end_year": 2024,
+      "highlights": [
+        "Researched ontology development using machine learning and designed scalable pipelines for processing raw chemical data into model-ready formats.",
+        "Created and optimized an augmented SMILES dataset with multiple configurations to improve training diversity and model generalization.",
+        "Implemented efficient code and data handling strategies for large-scale datasets, including batching and progress monitoring.",
+        "Trained models using GPU-enabled infrastructure and tracked experiments with Weights & Biases."
+      ]
+    },
+
+    {
+      "role": "Senior Systems Engineer",
+      "company": "Infosys Limited",
+      "location": "Trivandrum, India",
+      "start_year": 2023,
+      "end_year": 2023,
+      "highlights": [
+        "Developed computer vision solutions including image classification, object detection, live video analytics, and transfer learning applications.",
+        "Designed and implemented Natural Language Processing models.",
+        "Worked with developers to integrate project resources using Microsoft Azure.",
+        "Created and maintained technical documentation including bug reports, user manuals, development guidelines, and API documentation."
+      ]
+    },
+
+    {
+      "role": "Systems Engineer",
+      "company": "Infosys Limited",
+      "location": "Trivandrum, India",
+      "start_year": 2021,
       "end_year": 2022,
       "highlights": [
-        "Implemented Python REST API endpoints and automated data-validation tasks.",
-        "Used Git-based code review and CI workflows in a small product team."
+        "Collaborated in Agile team environments to deliver project objectives.",
+        "Collected, cleaned, and transformed large datasets to support data-driven decision making.",
+        "Created reports, dashboards, and visualizations to communicate data-driven insights.",
+        "Worked across the end-to-end AI and machine learning lifecycle from data preparation to model deployment."
       ]
     }
   ],
-  "education": [
+
+  "projects": [
     {
-      "degree": "BSc Computer Science",
-      "institution": "Example Technical University",
-      "graduation_year": 2022
+      "name": "Chatbot Development for Conversational Strategy Training",
+      "highlights": [
+        "Used Rasa for Natural Language Understanding and conversational flow management.",
+        "Applied prompt engineering to generate responses based on user input, sentiment, and conversational context.",
+        "Used large language models to support coherent and context-aware interactions."
+      ]
+    },
+
+    {
+      "name": "Text Clustering with NEON",
+      "highlights": [
+        "Developed a text clustering pipeline using NEON and KMeans.",
+        "Applied Layer-wise Relevance Propagation to generate visual and textual explanations for cluster assignments."
+      ]
+    },
+
+    {
+      "name": "Disease Prediction Using Large Language Models",
+      "highlights": [
+        "Integrated BioMistral-7B for disease prediction.",
+        "Implemented Retrieval-Augmented Generation to retrieve relevant medical reports and improve contextual responses.",
+        "Experimented with model architectures, word embeddings, and hyperparameters."
+      ]
+    },
+
+    {
+      "name": "Restaurant Revenue Prediction",
+      "highlights": [
+        "Performed exploratory data analysis and feature engineering.",
+        "Implemented predictive models using Linear Regression, Random Forest, KNN, Decision Trees, and Gradient Boosting Regressor for sales forecasting."
+      ]
     }
   ],
-  "preferred_roles": [
-    "AI Engineer",
-    "Machine Learning Engineer",
-    "Python Backend Engineer"
+
+  "education": [
+    {
+      "degree": "Master of Science in Digital Engineering",
+      "institution": "Otto-von-Guericke University",
+      "location": "Magdeburg, Germany",
+      "start_year": 2023,
+      "graduation_year": null
+    },
+
+    {
+      "degree": "Online Diploma in Artificial Intelligence & Machine Learning",
+      "institution": "University of Hyderabad",
+      "location": "Hyderabad, India",
+      "start_year": 2021,
+      "graduation_year": 2022
+    },
+
+    {
+      "degree": "Bachelor of Technology in Mechanical Engineering",
+      "institution": "Amrita School of Engineering",
+      "location": "Kollam, Kerala, India",
+      "start_year": 2016,
+      "graduation_year": 2020
+    }
   ],
-  "preferred_locations": [
-    "Berlin, Germany",
-    "Hamburg, Germany",
-    "Munich, Germany",
-    "Remote, EU"
+
+  "certifications": [
+    "Oracle Cloud Infrastructure 2024 Generative AI Certified Professional",
+    "Infosys Certified Data Science using Python Professional",
+    "Complete Data Science Bootcamp Certification from Udemy",
+    "Python Bootcamp Certification from Udemy"
   ],
-  "preferred_experience_levels": [
-    "Junior",
-    "Mid-level"
-  ]
+
+  "languages": [
+    {
+      "language": "English",
+      "level": "Fluent"
+    },
+    {
+      "language": "German",
+      "level": "Beginner"
+    }
+  ],
+
+  "preferred_roles": [],
+
+  "preferred_locations": [],
+
+  "preferred_experience_levels": []
 }
