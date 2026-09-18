@@ -1,6 +1,6 @@
 """Provider-independent LLM boundary models for the JobPilot Host.
 
-Future orchestration can depend on these small values without importing NVIDIA
+Host orchestration depends on these small values without importing NVIDIA
 or OpenAI SDK response classes. This module defines no execution loop.
 """
 
@@ -32,7 +32,7 @@ class LLMResponse:
 
 
 class LLMClient(Protocol):
-    """Minimal async chat-completion boundary required by the future Host loop."""
+    """Minimal async chat-completion boundary used by the Host orchestration loop."""
 
     async def complete(
         self,

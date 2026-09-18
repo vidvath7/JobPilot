@@ -1,11 +1,12 @@
 """Host-side lifecycle wrapper for the JobPilot MCP server.
 
-This module is the first Host layer: it knows how to launch and discover the MCP
-server, but it contains no LLM integration, capability selection, or workflow
+This module launches the MCP server, discovers capabilities, and delegates generic
+protocol operations. It contains no LLM integration, capability selection, or workflow
 orchestration. It communicates exclusively through MCP rather than importing
 server-side capability implementations.
 """
 
+import os
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -24,6 +25,7 @@ class JobPilotMCPClient:
         self,
         project_root: str | Path | None = None,
         python_executable: str | Path | None = None,
+        server_environment: dict[str, str] | None = None,
     ) -> None:
         """Configure repository-relative server launch details without connecting."""
         self._project_root = (
@@ -34,12 +36,15 @@ class JobPilotMCPClient:
         # Using the running Host interpreter keeps server launch inside the same
         # project environment and avoids depending on a global ``mcp`` command.
         self._python_executable = str(python_executable or sys.executable)
+        # Explicit child-process overrides support isolated persistence smoke
+        # tests without mutating the parent environment or server implementation.
+        self._server_environment = dict(server_environment) if server_environment is not None else None
         self._exit_stack: AsyncExitStack | None = None
         self._session: ClientSession | None = None
 
     @property
     def is_connected(self) -> bool:
-        """Report whether discovery operations currently have an initialized session."""
+        """Report whether protocol operations have an initialized session."""
         return self._session is not None
 
     async def connect(self) -> "JobPilotMCPClient":
@@ -48,10 +53,16 @@ class JobPilotMCPClient:
             raise RuntimeError("JobPilot MCP client is already connected.")
 
         exit_stack = AsyncExitStack()
+        # The SDK inherits only a restricted baseline by default. Snapshot the
+        # Host environment at connect time, then apply explicit child overrides.
+        # Never mutate os.environ to configure a single server subprocess.
+        child_environment = os.environ.copy()
+        child_environment.update(self._server_environment or {})
         server_parameters = StdioServerParameters(
             command=self._python_executable,
             args=["-m", "server.main"],
             cwd=self._project_root,
+            env=child_environment,
         )
 
         try:
@@ -157,7 +168,7 @@ class JobPilotMCPClient:
         return await self._require_session().get_prompt(name, arguments)
 
     def _require_session(self) -> ClientSession:
-        """Fail clearly when Host code attempts discovery outside its lifecycle."""
+        """Fail clearly when Host code attempts protocol operations outside its lifecycle."""
         if self._session is None:
             raise RuntimeError("JobPilot MCP client is not connected.")
         return self._session

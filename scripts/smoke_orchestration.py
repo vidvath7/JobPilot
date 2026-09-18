@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from host.mcp_client import JobPilotMCPClient
 from host.nvidia_llm import NVIDIALLMClient
 from host.orchestrator import AUTO_EXECUTABLE_TOOLS, JobPilotOrchestrator
+from host.prompt_workflow import PromptWorkflow
 
 
 async def run() -> None:
@@ -28,6 +29,8 @@ async def run() -> None:
         for query in (
             "Find AI Engineer jobs in Germany.",
             "Find GenAI or LLM-related jobs in Germany.",
+            "Show me the details for JOB-005.",
+            "How well do I match JOB-005? Use the job details when explaining.",
         ):
             print(f"\n=== {query} ===", flush=True)
             result = await orchestrator.ask(query)
@@ -36,6 +39,15 @@ async def run() -> None:
                 print(f"is_error: {call.is_error}")
                 print(f"result: {json.dumps(call.result)}")
             print(f"Answer: {result.answer}", flush=True)
+
+        print("\n=== prepare_application Workflow ===", flush=True)
+        workflow = PromptWorkflow(client, catalog, orchestrator)
+        result = await workflow.run_prompt("prepare_application", {"job_id": "JOB-005"})
+        for call in result.executed_tool_calls:
+            print(f"Tool: {call.name} {json.dumps(call.arguments)}")
+            print(f"is_error: {call.is_error}")
+            print(f"result: {json.dumps(call.result)}")
+        print(f"Answer: {result.answer}", flush=True)
 
 
 if __name__ == "__main__":

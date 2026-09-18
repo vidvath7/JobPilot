@@ -76,7 +76,7 @@ class NVIDIALLMClient:
             api_key=resolved_api_key,
             base_url=base_url,
             # Do not add an adapter retry policy; failures remain visible to the
-            # future Host orchestration layer that will own operational policy.
+            # Host orchestration layer that owns operational policy.
             max_retries=0,
         )
 
@@ -91,7 +91,7 @@ class NVIDIALLMClient:
         return self._base_url
 
     def __repr__(self) -> str:
-        """Return safe public configuration while never retaining the API key."""
+        """Represent public configuration without including the SDK client's credential."""
         return (
             f"NVIDIALLMClient(model={self._model!r}, "
             f"base_url={self._base_url!r})"

@@ -512,6 +512,11 @@ async def _exercise_prepare_application_prompt_over_mcp_stdio() -> None:
             assert "do not fabricate" in guidance
             assert "resume-tailoring guidance" in guidance
             assert "cover-letter guidance" in guidance
+            # Verify the hardened policy survives actual MCP Prompt retrieval;
+            # focused content tests cover individual evidence categories.
+            assert "evidence ledger" in guidance
+            assert "unknown / verify" in guidance
+            assert "verify with the candidate before using" in guidance
 
             # Missing required Prompt arguments are rejected at the stable MCP
             # request boundary; avoid coupling to validation wording.

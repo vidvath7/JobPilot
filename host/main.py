@@ -20,8 +20,9 @@ from host.capabilities import (
 )
 from host.mcp_client import JobPilotMCPClient
 from host.nvidia_llm import NVIDIALLMClient
+from host.prompt_workflow import PromptWorkflow
 from host.orchestrator import (
-    AUTO_EXECUTABLE_TOOLS, JobPilotOrchestrator, OrchestrationError,
+    AUTO_EXECUTABLE_TOOLS, CONFIRMATION_REQUIRED_TOOLS, JobPilotOrchestrator, OrchestrationError,
 )
 
 
@@ -53,6 +54,8 @@ def format_help() -> str:
                 Read a Resource, for example: read example://context
   prompt <prompt_name> [<json_object>]
                 Retrieve a Prompt, for example: prompt example_prompt {"id":"123"}
+  run-prompt <prompt_name> [<json_object>]
+                Retrieve a discovered Prompt and run it as an LLM workflow.
   quit          Exit JobPilot.
   exit          Alias for quit."""
 
@@ -119,6 +122,7 @@ async def run_repl(
     client: JobPilotMCPClient,
     *,
     orchestrator: JobPilotOrchestrator | None = None,
+    prompt_workflow: PromptWorkflow | None = None,
     input_function: Callable[[str], str] = input,
     output_function: Callable[[str], None] = print,
 ) -> None:
@@ -151,6 +155,8 @@ async def run_repl(
             await _handle_read(parts, client, output_function)
         elif command == "prompt":
             await _handle_prompt(parts, client, output_function)
+        elif command == "run-prompt":
+            await _handle_run_prompt(parts, prompt_workflow, output_function)
         elif command == "ask":
             request = command_line.split(maxsplit=1)
             if len(request) < 2:
@@ -169,7 +175,7 @@ async def run_repl(
                 except OrchestrationError as error:
                     output_function(f"Orchestration error: {error}")
         else:
-            # Only an explicit ask command enters model orchestration.
+            # Model orchestration requires explicit ask or run-prompt selection.
             output_function(UNKNOWN_COMMAND_MESSAGE)
 
 
@@ -180,8 +186,59 @@ async def run_host() -> None:
         orchestrator = JobPilotOrchestrator(
             NVIDIALLMClient(), client, catalog,
             allowed_tools=AUTO_EXECUTABLE_TOOLS,
+            confirmation_required_tools=CONFIRMATION_REQUIRED_TOOLS,
+            approval_handler=confirm_action,
         )
-        await run_repl(catalog, client, orchestrator=orchestrator)
+        await run_repl(
+            catalog, client, orchestrator=orchestrator,
+            prompt_workflow=PromptWorkflow(client, catalog, orchestrator),
+        )
+
+
+async def confirm_action(
+    tool_name: str, arguments: dict[str, object], *,
+    input_function: Callable[[str], str] = input,
+    output_function: Callable[[str], None] = print,
+) -> bool:
+    """Ask for this exact LLM-requested action; only explicit yes permits dispatch.
+
+    This UI callback is used by ask and run-prompt via their shared orchestrator.
+    Manual call commands already express the user's direct execution choice.
+    """
+    output_function("State-changing action requested:")
+    output_function(f"Tool: {tool_name}")
+    output_function("Arguments:\n" + json.dumps(arguments, indent=2, ensure_ascii=False))
+    try:
+        return input_function("Execute this action? [y/N]: ").strip().casefold() in {"y", "yes"}
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+async def _handle_run_prompt(parts, workflow, output_function) -> None:
+    """Parse user selection; keep retrieval and execution policy in the workflow."""
+    if len(parts) < 2:
+        output_function("Usage: run-prompt <prompt_name> [<json_object>]")
+        return
+    arguments = _parse_json_object(parts[2] if len(parts) == 3 else None)
+    if isinstance(arguments, str):
+        output_function(arguments)
+        return
+    if arguments is not None and not all(isinstance(value, str) for value in arguments.values()):
+        output_function("Prompt argument values must be strings.")
+        return
+    if workflow is None:
+        output_function("Prompt workflow is unavailable.")
+        return
+    try:
+        result = await workflow.run_prompt(parts[1], arguments)
+        output_function(f"Workflow: {parts[1]}")
+        output_function("Tool/Resource operations:")
+        for call in result.executed_tool_calls:
+            state = "error" if call.is_error else "success"
+            output_function(f"- {call.name} {json.dumps(call.arguments)} ({state})")
+        output_function("Answer:\n" + (result.answer or "Model returned no text answer."))
+    except OrchestrationError as error:
+        output_function(f"Prompt workflow error: {error}")
 
 
 async def _handle_call(

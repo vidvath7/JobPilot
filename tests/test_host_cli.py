@@ -409,3 +409,30 @@ def test_ask_routes_text_and_survives_errors(catalog):
     assert 'search_jobs {"role": "AI Engineer"}' in rendered
     assert "Here are the jobs." in rendered and "Available commands:" in rendered
     assert "CallToolResult" not in rendered and "Traceback" not in rendered
+
+
+def test_run_prompt_routing_validation_and_recovery(catalog):
+    """Explicit workflow command parses input and renders results while recovering from errors."""
+    workflow = AsyncMock()
+    workflow.run_prompt.side_effect = [
+        OrchestrationError("Unknown Prompt"),
+        OrchestrationResult("Grounded guidance", (
+            ExecutedToolCall("r1", "read_mcp_resource", {"uri": "candidate://profile"}, [], False),
+        )),
+    ]
+    commands = iter([
+        "run-prompt", "run-prompt selected {bad}", "run-prompt selected []",
+        'run-prompt selected {"item":5}', 'run-prompt missing',
+        'run-prompt selected {"item":"JOB-005"}', "help", "quit",
+    ])
+    output = []
+    asyncio.run(run_repl(catalog, FakeMCPClient(), prompt_workflow=workflow,
+                         input_function=lambda _: next(commands), output_function=output.append))
+    assert [call.args for call in workflow.run_prompt.call_args_list] == [
+        ("missing", None), ("selected", {"item": "JOB-005"}),
+    ]
+    rendered = "\n".join(output)
+    for text in ("Usage: run-prompt", "Invalid JSON", "must be an object", "must be strings",
+                 "Unknown Prompt", "Workflow: selected", "read_mcp_resource", "Grounded guidance", "Available commands:"):
+        assert text in rendered
+    assert "Traceback" not in rendered and "GetPromptResult" not in rendered

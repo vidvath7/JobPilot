@@ -3,7 +3,7 @@
 This script is intentionally outside the automated test suite because it uses a
 real hosted model and therefore requires a developer-provided credential and
 network access. Model-selected Tools are printed for inspection but never
-executed; automatic orchestration belongs to a later JobPilot milestone.
+executed; live execution is tested separately by smoke_orchestration.py.
 """
 
 import asyncio

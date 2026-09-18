@@ -8,7 +8,8 @@ import pytest
 from mcp import types
 from mcp.shared.exceptions import MCPError
 
-from host.capabilities import CapabilityCatalog, ToolCapability
+from host.capabilities import CapabilityCatalog, ToolCapability, ResourceCapability, ResourceTemplateCapability
+from host.resource_bridge import RESOURCE_BRIDGE_NAME
 from host.llm import LLMResponse, LLMToolCall
 from host.orchestrator import AUTO_EXECUTABLE_TOOLS, JobPilotOrchestrator, OrchestrationError
 
@@ -30,6 +31,7 @@ class FakeMCP:
 
     def __init__(self, result=None, error=None):
         self.calls = []
+        self.reads = []
         self.result = result if result is not None else types.CallToolResult(
             content=[], structuredContent={"score": 60.0},
         )
@@ -41,19 +43,31 @@ class FakeMCP:
             raise self.error
         return self.result
 
+    async def read_resource(self, uri):
+        """Record the separate MCP Resource operation and return SDK text content."""
+        self.reads.append(uri)
+        if self.error:
+            raise self.error
+        return types.ReadResourceResult(contents=[
+            types.TextResourceContents(uri=uri, mimeType="application/json", text='{"id":"JOB-005"}'),
+        ])
 
-def make_orchestrator(llm, mcp, max_tool_rounds=3):
+
+def make_orchestrator(llm, mcp, max_tool_rounds=3, **policy):
     """Include a disallowed discovered Tool to exercise both policy boundaries."""
     catalog = CapabilityCatalog(
         tools=tuple(ToolCapability(name, name, {
             "type": "object", "properties": {"job_id": {"type": "string"}},
             "required": ["job_id"],
         }) for name in ("search_jobs", "score_job_match", "save_application")),
-        resources=(), resource_templates=(), prompts=(),
+        resources=(ResourceCapability("candidate://profile", "profile", "Candidate profile", "application/json"),),
+        resource_templates=(ResourceTemplateCapability("jobs://job/{job_id}", "job", "Job details", "application/json"),),
+        prompts=(),
     )
     return JobPilotOrchestrator(
         llm, mcp, catalog, allowed_tools=AUTO_EXECUTABLE_TOOLS,
         max_tool_rounds=max_tool_rounds,
+        **policy,
     )
 
 
@@ -74,7 +88,7 @@ def test_plain_answer_and_filtered_discovered_schemas():
     options = llm.requests[0][1]
     assert options["tool_choice"] == "auto"
     assert [tool["function"]["name"] for tool in options["tools"]] == [
-        "search_jobs", "score_job_match",
+        "search_jobs", "score_job_match", RESOURCE_BRIDGE_NAME,
     ]
     assert options["tools"][0]["function"]["parameters"]["required"] == ["job_id"]
 
@@ -145,7 +159,7 @@ def test_multiple_rounds_preserve_history_policy_and_execution_order(round_count
     for index, (messages, options) in enumerate(llm.requests):
         assert len(messages) == 1 + index * 2
         assert messages[0] == {"role": "user", "content": "Find jobs"}
-        assert {tool["function"]["name"] for tool in options["tools"]} == AUTO_EXECUTABLE_TOOLS
+        assert {tool["function"]["name"] for tool in options["tools"]} == AUTO_EXECUTABLE_TOOLS | {RESOURCE_BRIDGE_NAME}
         assert options["tool_choice"] == "auto"
         if index:
             previous = llm.requests[index - 1][0]
@@ -226,3 +240,68 @@ def test_unsupported_mcp_result_is_rejected():
         asyncio.run(make_orchestrator(
             FakeLLM(selection("search_jobs")), FakeMCP(object()),
         ).ask("Find"))
+
+
+def resource_selection(call_id="resource", uri="candidate://profile"):
+    """Model asks for Host context through the local function name."""
+    return LLMResponse(None, (LLMToolCall(call_id, RESOURCE_BRIDGE_NAME, {"uri": uri}),))
+
+
+@pytest.mark.parametrize("uri", ["candidate://profile", "jobs://job/JOB-005"])
+def test_resource_bridge_dispatch_and_serializable_history(uri):
+    """Resource calls never enter tools/call; actual SDK text reaches the next completion."""
+    llm, mcp = FakeLLM(resource_selection(uri=uri), LLMResponse("Grounded answer", ())), FakeMCP()
+    result = asyncio.run(make_orchestrator(llm, mcp).ask("Read context"))
+    assert mcp.reads == [uri] and mcp.calls == []
+    assert result.answer == "Grounded answer"
+    assert result.executed_tool_calls[0].name == RESOURCE_BRIDGE_NAME
+    messages = llm.requests[1][0]
+    json.dumps(messages)  # No SDK models can be serialized by the plain JSON encoder.
+    payload = json.loads(messages[-1]["content"])
+    assert payload == {"is_error": False, "result": [
+        {"uri": uri, "mime_type": "application/json", "text": '{"id":"JOB-005"}'},
+    ]}
+
+
+def test_unrelated_resource_rejected_before_mcp():
+    """Discovery is a read boundary, not permission to fetch arbitrary URIs."""
+    llm, mcp = FakeLLM(resource_selection(uri="file:///secret")), FakeMCP()
+    with pytest.raises(OrchestrationError, match="does not match discovered"):
+        asyncio.run(make_orchestrator(llm, mcp).ask("Read"))
+    assert mcp.reads == [] and mcp.calls == []
+
+
+def test_mixed_resource_and_tool_rounds():
+    """The same bounded history coordinates both dispatch paths in model order."""
+    llm = FakeLLM(resource_selection(uri="jobs://job/JOB-005"), selection("score_job_match"), LLMResponse("Match explanation", ()))
+    mcp = FakeMCP()
+    result = asyncio.run(make_orchestrator(llm, mcp).ask("Explain match"))
+    assert [call.name for call in result.executed_tool_calls] == [RESOURCE_BRIDGE_NAME, "score_job_match"]
+    assert len(mcp.reads) == 1 and len(mcp.calls) == 1
+    assert len(llm.requests[-1][0]) == 5
+    for _, options in llm.requests:
+        assert {item["function"]["name"] for item in options["tools"]} == AUTO_EXECUTABLE_TOOLS | {RESOURCE_BRIDGE_NAME}
+
+
+def test_repeated_resource_read_rejected():
+    """Canonical repetition protection applies to Host bridge calls as well."""
+    llm, mcp = FakeLLM(resource_selection("one"), resource_selection("two")), FakeMCP()
+    with pytest.raises(OrchestrationError, match="Identical Tool call repeated"):
+        asyncio.run(make_orchestrator(llm, mcp).ask("Read"))
+    assert mcp.reads == ["candidate://profile"]
+
+
+def test_resource_round_counts_toward_limit():
+    """Reading context does not bypass the shared orchestration budget."""
+    llm, mcp = FakeLLM(resource_selection(), selection("score_job_match")), FakeMCP()
+    with pytest.raises(OrchestrationError, match="Maximum Tool rounds exceeded"):
+        asyncio.run(make_orchestrator(llm, mcp, 1).ask("Read and score"))
+    assert len(mcp.reads) == 1 and mcp.calls == []
+
+
+def test_resource_protocol_failure_is_not_success():
+    """Resource failures arrive as MCP exceptions and stop the request explicitly."""
+    llm, mcp = FakeLLM(resource_selection()), FakeMCP(error=MCPError(-32000, "missing"))
+    with pytest.raises(OrchestrationError, match="MCP execution failed"):
+        asyncio.run(make_orchestrator(llm, mcp).ask("Read"))
+    assert len(llm.requests) == 1
