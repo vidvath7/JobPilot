@@ -12,6 +12,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from server.services.job_service import JobService
 
@@ -28,6 +29,8 @@ _APPLICATION_FIELDS = {
     "notes",
 }
 _APPLICATION_ID_PATTERN = re.compile(r"APP-(\d+)$")
+_HIMALAYAS_ID_PATTERN = re.compile(r"himalayas::([A-Za-z0-9][A-Za-z0-9_-]*)::([A-Za-z0-9][A-Za-z0-9_-]*)$")
+_EXTERNAL_RECORD_FIELDS = {"job_source", "job_url", "job_title", "company"}
 
 
 class InvalidApplicationStatusError(ValueError):
@@ -77,24 +80,56 @@ class ApplicationService:
     ) -> dict[str, Any]:
         """Validate and append one application without rewriting user notes."""
         normalized_job_id = job_id.strip()
-        normalized_status = status.strip().casefold()
-
-        if normalized_status not in _ALLOWED_STATUSES:
-            raise InvalidApplicationStatusError(
-                f"Unsupported application status: {status}"
-            )
-
+        # Preserve the original validation order for local calls.
+        self._normalize_status(status)
         # Reuse JobService as the source of truth for job existence. Its
         # JobNotFoundError intentionally propagates to the caller.
         self._job_service.get_job(normalized_job_id)
+        return self._save_record(normalized_job_id, status, notes, {})
+
+    def save_external_application(
+        self, job_id: str, *, job_source: str, job_url: str,
+        job_title: str, company: str, status: str = "applied",
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Save a Host-normalized external job with independent provenance checks.
+
+        This ordinary service method leaves the existing MCP Tool contract and
+        five-field local records intact. The Host must approve every call first.
+        """
+        normalized_job_id = job_id.strip()
+        match = _HIMALAYAS_ID_PATTERN.fullmatch(normalized_job_id)
+        if job_source != "himalayas" or match is None:
+            raise ValueError("External application requires a Himalayas job identity.")
+        try:
+            url = urlsplit(job_url)
+            valid_url = (
+                url.scheme == "https" and url.netloc == "himalayas.app"
+                and url.path == f"/companies/{match[1]}/jobs/{match[2]}"
+                and not url.fragment
+            )
+        except (TypeError, ValueError):
+            valid_url = False
+        if not valid_url or any(not isinstance(value, str) or not value.strip()
+                                for value in (job_title, company)):
+            raise ValueError("External application provenance is incomplete or invalid.")
+        return self._save_record(normalized_job_id, status, notes, {
+            "job_source": job_source, "job_url": job_url,
+            "job_title": job_title, "company": company,
+        })
+
+    def _save_record(self, job_id: str, status: str, notes: str | None,
+                     provenance: dict[str, str]) -> dict[str, Any]:
+        """Share status, duplicate, timestamp and append rules across job sources."""
+        normalized_status = self._normalize_status(status)
         applications = self._load_applications()
 
         if any(
-            existing["job_id"].strip() == normalized_job_id
+            existing["job_id"].strip() == job_id
             for existing in applications
         ):
             raise DuplicateApplicationError(
-                f"An application already exists for job ID: {normalized_job_id}"
+                f"An application already exists for job ID: {job_id}"
             )
 
         applied_at = self._clock()
@@ -103,16 +138,25 @@ class ApplicationService:
 
         record = {
             "application_id": self._next_application_id(applications),
-            "job_id": normalized_job_id,
+            "job_id": job_id,
             "status": normalized_status,
             "applied_at": applied_at.astimezone(timezone.utc).isoformat(),
             "notes": notes,
+            **provenance,
         }
 
         # Build a new list so validation failures cannot partially mutate the
         # loaded state before the single persistence write.
         self._write_applications([*applications, record])
         return record
+
+    @staticmethod
+    def _normalize_status(status: str) -> str:
+        """Keep the approved vocabulary identical for local and external saves."""
+        normalized = status.strip().casefold()
+        if normalized not in _ALLOWED_STATUSES:
+            raise InvalidApplicationStatusError(f"Unsupported application status: {status}")
+        return normalized
 
     def get_applications(self) -> list[dict[str, Any]]:
         """Return a newly parsed snapshot of all persisted application records."""
@@ -165,6 +209,26 @@ class ApplicationService:
                 raise ValueError(
                     f"Application at index {index} has invalid notes."
                 )
+            external_fields = _EXTERNAL_RECORD_FIELDS & application.keys()
+            if external_fields and external_fields != _EXTERNAL_RECORD_FIELDS:
+                raise ValueError(f"Application at index {index} has incomplete provenance.")
+            if external_fields:
+                match = _HIMALAYAS_ID_PATTERN.fullmatch(application["job_id"])
+                try:
+                    url = urlsplit(application["job_url"])
+                    valid_url = (
+                        url.scheme == "https" and url.netloc == "himalayas.app"
+                        and match is not None
+                        and url.path == f"/companies/{match[1]}/jobs/{match[2]}"
+                        and not url.fragment
+                    )
+                except (TypeError, ValueError):
+                    valid_url = False
+                if (application["job_source"] != "himalayas" or not valid_url
+                        or any(not isinstance(application[name], str)
+                               or not application[name].strip()
+                               for name in ("job_title", "company"))):
+                    raise ValueError(f"Application at index {index} has invalid provenance.")
 
         return applications
 

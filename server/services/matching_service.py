@@ -6,7 +6,7 @@ score can later be exposed through any interface without changing its meaning.
 """
 
 import re
-from typing import Any
+from typing import Any, Mapping, Sequence, TypedDict
 
 from server.services.job_service import JobService
 from server.services.profile_service import ProfileService
@@ -65,6 +65,17 @@ _GENERIC_ROLE_TOKENS = {
 _SEPARATORS = re.compile(r"[-_/\s,]+")
 
 
+class JobForMatching(TypedDict):
+    """Minimal data shape shared by local records and normalized external jobs."""
+
+    id: str
+    title: str
+    company: str
+    location: str | None
+    experience_level: str | None
+    required_skills: Sequence[str]
+
+
 class MatchingService:
     """Calculate reproducible match components and human-readable evidence."""
 
@@ -79,10 +90,22 @@ class MatchingService:
 
     def score_job_match(self, job_id: str) -> dict[str, Any]:
         """Score one known job using the approved four weighted components."""
-        profile = self._profile_service.get_profile()
         # JobNotFoundError deliberately propagates: an unknown job is an invalid
         # lookup, not a real job with a zero-percent match.
         job = self._job_service.get_job(job_id)
+        return self.score_job_data(job)
+
+    def score_job_data(
+        self, job: JobForMatching, *, profile: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Apply the same deterministic formula to supplied job data.
+
+        The Host may supply the exact candidate profile read through MCP. Local
+        ID calls continue loading their usual profile and job through services.
+        Missing external location/seniority remain None rather than invented text.
+        """
+        if profile is None:
+            profile = self._profile_service.get_profile()
 
         skills_score, matched_skills, missing_skills = _score_skills(
             profile["skills"], job["required_skills"]
@@ -150,7 +173,7 @@ def _normalize_role(role: str) -> str:
 
 
 def _score_skills(
-    candidate_skills: list[str], required_skills: list[str]
+    candidate_skills: Sequence[str], required_skills: Sequence[str]
 ) -> tuple[float, list[str], list[str]]:
     """Score required-skill coverage while preserving job labels as evidence."""
     if not required_skills:
@@ -224,10 +247,10 @@ def _score_role(
 
 
 def _score_experience(
-    job_experience_level: str, preferred_experience_levels: list[str]
+    job_experience_level: str | None, preferred_experience_levels: list[str]
 ) -> tuple[float, dict[str, Any]]:
     """Return binary experience points with the source preferences preserved."""
-    normalized_job_level = _normalize_text(job_experience_level)
+    normalized_job_level = _normalize_text(job_experience_level) if job_experience_level is not None else None
 
     for preferred_level in preferred_experience_levels:
         if normalized_job_level == _normalize_text(preferred_level):
@@ -245,14 +268,14 @@ def _score_experience(
 
 
 def _score_location(
-    job_location: str, preferred_locations: list[str]
+    job_location: str | None, preferred_locations: list[str]
 ) -> tuple[float, dict[str, Any]]:
     """Return location points and the actual preference responsible for a match."""
-    normalized_job_location = _normalize_text(job_location)
+    normalized_job_location = _normalize_text(job_location) if job_location is not None else None
 
     for preferred_location in preferred_locations:
         normalized_preference = _normalize_text(preferred_location)
-        if normalized_preference in normalized_job_location:
+        if normalized_job_location is not None and normalized_preference in normalized_job_location:
             return 100.0, {
                 "job_location": job_location,
                 "candidate_preferences": list(preferred_locations),

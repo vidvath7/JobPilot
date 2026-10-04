@@ -39,6 +39,33 @@ class MalformedToolArgumentsError(ValueError):
     """Raised when model-requested Tool arguments are not a valid JSON object."""
 
 
+def safe_provider_error(error: Exception) -> dict[str, object]:
+    """Whitelist diagnostic metadata; never serialize errors, responses or headers.
+
+    Error bodies can echo source text or credentials. Unknown type/code values
+    are marked as redacted rather than treating arbitrary provider strings as safe.
+    """
+    known = {"server_error", "internal_server_error", "internal_error", "invalid_request_error",
+             "bad_request", "rate_limit_error", "rate_limit_exceeded", "authentication_error",
+             "permission_error", "not_found_error", "invalid_request", "context_length_exceeded",
+             "insufficient_quota", "model_not_found", "invalid_api_key", "500", "502", "503", "504"}
+    body = getattr(error, "body", None)
+    metadata = body.get("error", body) if isinstance(body, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    def label(key):
+        value = metadata.get(key, getattr(error, key, None))
+        if value is None:
+            return None
+        return value if isinstance(value, str) and value in known else "[unrecognized metadata redacted]"
+
+    status = getattr(error, "status_code", None)
+    return {"exception_class": type(error).__name__,
+            "http_status": status if type(status) is int else None,
+            "provider_error_type": label("type"), "provider_error_code": label("code")}
+
+
 class NVIDIALLMClient:
     """Send non-streaming NVIDIA chat completions and return Host-owned results."""
 
@@ -50,10 +77,12 @@ class NVIDIALLMClient:
         model: str = DEFAULT_NVIDIA_MODEL,
         client: Any | None = None,
         client_factory: Callable[..., Any] | None = None,
+        diagnostic_handler: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         """Configure NVIDIA defaults while supporting secret-free test injection."""
         self._base_url = base_url
         self._model = model
+        self._diagnostic_handler = diagnostic_handler
 
         if client is not None:
             # Tests may inject a complete SDK-compatible client without requiring
@@ -119,8 +148,34 @@ class NVIDIALLMClient:
             request["tools"] = deepcopy(list(tools))
             request["tool_choice"] = deepcopy(tool_choice)
 
-        completion = await self._client.chat.completions.create(**request)
-        return _normalize_completion(completion)
+        # Opt-in development metadata excludes message content and provider bodies.
+        # Preserve the original exception types and request/response semantics.
+        metadata = {"model": self._model, "response_format_requested": False,
+                    "json_mode_requested": False, "json_schema_requested": False,
+                    "tools_requested": bool(tools), "tool_choice_sent": request.get("tool_choice"),
+                    "max_tokens_sent": None, "temperature": 0.0, "stream": False,
+                    "enable_thinking": False}
+
+        def report(stage, **extra):
+            if self._diagnostic_handler is not None:
+                self._diagnostic_handler({**metadata, "stage": stage, **extra})
+
+        report("nvidia.chat_completions.request")
+        try:
+            completion = await self._client.chat.completions.create(**request)
+        except Exception as error:
+            report("nvidia.chat_completions.failed", host_response_parsing_started=False,
+                   **safe_provider_error(error))
+            raise
+        report("nvidia.response_parsing.started", host_response_parsing_started=True)
+        try:
+            result = _normalize_completion(completion)
+        except Exception as error:
+            report("nvidia.response_parsing.failed", host_response_parsing_started=True,
+                   **safe_provider_error(error))
+            raise
+        report("nvidia.response_parsing.completed", host_response_parsing_started=True)
+        return result
 
 
 def _normalize_completion(completion: Any) -> LLMResponse:

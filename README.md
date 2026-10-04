@@ -110,6 +110,37 @@ Automated persistence tests use temporary stores and require no live NVIDIA call
 
 Orchestration defaults to three Tool rounds, retains history, and rejects exact repeated calls. Resource bridging supports text contents and simple URI placeholders. Search remains literal/deterministic; live model choices can vary. The Prompt's SUPPORTED / GAP / UNKNOWN-VERIFY policy guides grounding, but model output still requires human review. Resume and cover-letter files are not generated.
 
+## External MCP smoke check (Phase A1)
+
+```text
+uv run python scripts/smoke_himalayas_mcp.py
+```
+
+Himalayas uses remote Streamable HTTP; public discovery and public tools require no authentication. This check only discovers metadata: it performs no job searches and does not expose Himalayas to JobPilot LLM orchestration or multi-server routing. See the [Himalayas MCP documentation](https://himalayas.app/docs/remote-jobs-mcp).
+
+## Multi-server discovery and routing (Phase A2)
+
+`uv run python scripts/smoke_multi_server.py` connects local stdio and remote
+Himalayas clients and demonstrates the `search_jobs` name collision without
+executing Tools. The Host manager preserves ownership as `jobpilot::search_jobs`
+and `himalayas::search_jobs`; MCP requests retain the original `search_jobs` name.
+Tools/Prompts require qualified names; Resource reads require an explicit server
+ID. Startup is strict: connection failure closes all attempted connections in
+reverse order. Discovery is required before routing. This separate catalog is
+not connected to LLM orchestration; no external job-search workflow exists yet.
+
+## Live remote-job discovery (Phase A3)
+
+Opt in with `uv run python -m host.main --live-jobs`, then use
+`ask Find mid-level AI jobs in Germany`. This connects Himalayas at startup and
+offers only its public `search_jobs`, `get_job_details`, and `get_related_jobs`
+Tools to the model. Search covers the Himalayas remote-job marketplace, not all
+jobs on the internet. Local `search_jobs` remains available in the default/offline
+Host path and manual commands. `run-prompt` remains local; local application saves
+still require per-action approval. External jobs are not normalized, imported,
+scored, or saved in JobPilot. Run `uv run python scripts/smoke_himalayas_search.py`
+for the manual live search/details experiment (NVIDIA credentials required).
+
 ## Scope-control principle
 
 Every important architectural component should have a clear MCP learning justification. Complexity that does not support the current learning objective should be postponed.

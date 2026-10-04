@@ -26,8 +26,11 @@ class JobPilotMCPClient:
         project_root: str | Path | None = None,
         python_executable: str | Path | None = None,
         server_environment: dict[str, str] | None = None,
+        *,
+        server_id: str = "jobpilot",
     ) -> None:
         """Configure repository-relative server launch details without connecting."""
+        self.server_id = server_id
         self._project_root = (
             Path(project_root)
             if project_root is not None

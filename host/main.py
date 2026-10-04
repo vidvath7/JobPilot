@@ -179,8 +179,11 @@ async def run_repl(
             output_function(UNKNOWN_COMMAND_MESSAGE)
 
 
-async def run_host() -> None:
+async def run_host(*, live_jobs: bool = False) -> None:
     """Connect, discover once, run the REPL, and close the MCP client normally."""
+    if live_jobs:
+        await _run_live_host()
+        return
     async with JobPilotMCPClient() as client:
         catalog = await client.discover_capabilities()
         orchestrator = JobPilotOrchestrator(
@@ -193,6 +196,35 @@ async def run_host() -> None:
             catalog, client, orchestrator=orchestrator,
             prompt_workflow=PromptWorkflow(client, catalog, orchestrator),
         )
+
+
+async def _run_live_host() -> None:
+    """Opt-in remote startup leaves offline/local CLI and Prompt workflows intact."""
+    from host.himalayas import create_himalayas_client
+    from host.mcp_server_manager import MCPServerManager
+    from host.multi_server_orchestrator import MultiServerOrchestrator
+
+    client = JobPilotMCPClient()
+    manager = MCPServerManager()
+    manager.register(client)
+    manager.register(create_himalayas_client())
+    async with manager:
+        owned = await manager.discover_capabilities()
+        local = CapabilityCatalog(
+            tuple(t.capability for t in owned.tools if t.server_id == client.server_id),
+            tuple(r.capability for r in owned.resources if r.server_id == client.server_id),
+            tuple(r.capability for r in owned.resource_templates if r.server_id == client.server_id),
+            tuple(p.capability for p in owned.prompts if p.server_id == client.server_id),
+        )
+        llm = NVIDIALLMClient()
+        local_engine = JobPilotOrchestrator(
+            llm, client, local, allowed_tools=AUTO_EXECUTABLE_TOOLS,
+            confirmation_required_tools=CONFIRMATION_REQUIRED_TOOLS, approval_handler=confirm_action,
+        )
+        print("Live ask: Himalayas remote-job discovery. Manual commands and Prompts remain local.")
+        await run_repl(local, client,
+                       orchestrator=MultiServerOrchestrator(llm, manager, owned, approval_handler=confirm_action),
+                       prompt_workflow=PromptWorkflow(client, local, local_engine))
 
 
 async def confirm_action(
@@ -414,8 +446,12 @@ def _format_capability(identifier: str, description: str | None) -> str:
 
 def main() -> None:
     """Run the asynchronous Host lifecycle from ``python -m host.main``."""
+    import argparse
+    parser = argparse.ArgumentParser(description="JobPilot MCP Host")
+    parser.add_argument("--live-jobs", action="store_true", help="Use Himalayas for ask job discovery")
+    args = parser.parse_args()
     _load_local_environment()
-    asyncio.run(run_host())
+    asyncio.run(run_host(live_jobs=args.live_jobs))
 
 
 if __name__ == "__main__":

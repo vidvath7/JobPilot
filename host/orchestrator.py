@@ -63,6 +63,7 @@ class JobPilotOrchestrator:
         max_tool_rounds: int = 3,
         confirmation_required_tools: Iterable[str] = (),
         approval_handler: ApprovalHandler | None = None,
+        execution_observer: Callable[[ExecutedToolCall], None] | None = None,
     ) -> None:
         if type(max_tool_rounds) is not int or max_tool_rounds < 1:
             raise ValueError("max_tool_rounds must be a positive integer.")
@@ -75,6 +76,7 @@ class JobPilotOrchestrator:
             raise ValueError("Automatic and confirmation-required Tool policies must not overlap.")
         self._requestable = self._allowed | self._confirmation_required
         self._approval_handler = approval_handler
+        self._execution_observer = execution_observer
         self._discovered = frozenset(tool.name for tool in catalog.tools)
         self._catalog = catalog
         if RESOURCE_BRIDGE_NAME in self._discovered:
@@ -209,6 +211,10 @@ class JobPilotOrchestrator:
                 executed.append(ExecutedToolCall(
                     call.id, call.name, deepcopy(call.arguments), result, is_error,
                 ))
+                # Optional development tracing happens immediately, so later model
+                # failures do not hide completed MCP operations. Isolate its copy.
+                if self._execution_observer is not None:
+                    self._execution_observer(deepcopy(executed[-1]))
                 executed_keys.add(key)
                 messages.append({
                     "role": "tool",
